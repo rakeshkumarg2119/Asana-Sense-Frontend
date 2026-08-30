@@ -170,5 +170,5 @@
 Distributed under the **Apache-2.0 License**. See `LICENSE` for details.
 
 <p align="center">
-  Crafted with 🧘 for mindfulness & movement powered by <b>Google AI Studio</b>.
+  Crafted with 🧘 for mindfulness & movement powered by <b>Claude Fable5</b>.
 </p>
