@@ -1,0 +1,11 @@
+{
+  "name": "Remix Remix ASANA - SENSE",
+  "description": "AI-powered yoga posture correction, voice-guided pose selection, real-time feedback, BMI diet planner, encrypted session tracking, and private cloud profile reports.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
