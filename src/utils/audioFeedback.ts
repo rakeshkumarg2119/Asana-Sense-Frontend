@@ -68,15 +68,45 @@ class SoundEngine {
     }
   }
 
+  private lastSpoken = '';
+  private lastSpokenAt = 0;
+
   // Speak voice instruction via browser speech synthesis
   speak(text: string) {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
+    if (!('speechSynthesis' in window) || !text) return;
+
+    // 1. Collapse stray single-letter spacing ("R A K E S H" -> "Rakesh")
+    let clean = text
+      .replace(/\b([A-Za-z])(?:\s+([A-Za-z])\b)+/g, (match) => {
+        const merged = match.replace(/\s+/g, '');
+        return merged.charAt(0).toUpperCase() + merged.slice(1).toLowerCase();
+      });
+
+    // 2. Convert ALL-CAPS words (length >= 2) into Title Case (e.g. "PRAVEEN" -> "Praveen", "YOGI" -> "Yogi")
+    // Browser SpeechSynthesis treats uppercase words as acronyms and spells out each letter.
+    // Title Case ensures it is naturally spoken as a whole word.
+    clean = clean.replace(/\b([A-Z]{2,})\b/g, (match) => {
+      // Keep acronyms that should be pronounced as acronyms if any, but general words/names become Title Case
+      if (match === 'AI' || match === 'UI' || match === 'ID' || match === 'OK') return match;
+      return match.charAt(0).toUpperCase() + match.slice(1).toLowerCase();
+    }).trim();
+
+    // block duplicate/overlapping utterance fired again inside 3s window
+    const now = Date.now();
+    if (clean === this.lastSpoken && now - this.lastSpokenAt < 3000) return;
+    this.lastSpoken = clean;
+    this.lastSpokenAt = now;
+
+    window.speechSynthesis.cancel();
+    // Chrome/WebKit bug: speak() called in the same tick right after
+    // cancel() can clip or merge with whatever was still finishing.
+    // A tiny delay lets the cancel actually land before the new utterance starts.
+    setTimeout(() => {
+      const utterance = new SpeechSynthesisUtterance(clean);
       utterance.rate = 0.95;
       utterance.pitch = 1.05;
       window.speechSynthesis.speak(utterance);
-    }
+    }, 60);
   }
 
   // Soft audio chime for successful voice command recognition (immediate non-visual confirmation)

@@ -15,13 +15,20 @@ import { AuthModal } from './components/AuthModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { PreSessionOnboardingModal } from './components/PreSessionOnboardingModal';
 import { AppLoading } from './components/AppLoading';
+import { SessionLoadingTransition } from './components/SessionLoadingTransition';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Footer } from './components/Footer';
-import { UserProfile, YogaPose, PracticeSession } from './types';
-import { getStoredUserProfile, saveUserProfile, saveSessionRecord } from './utils/profileStorage';
+import type { UserProfile, YogaPose, PracticeSession } from './types';
+import { getStoredUserProfile, saveUserProfile, saveSessionRecord, fetchUserProfileFromAPI } from './utils/profileStorage';
+import { getToken, apiLogout } from './utils/apiClient';
+import { fetchPosesFromAPI, ALL_POSES } from './data/yogaPoses';
 
 export default function App() {
   // User profile & auth state
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+
+  // Poses from API or fallback
+  const [poses, setPoses] = useState<YogaPose[]>(ALL_POSES);
 
   // Active view: 'home' or 'live-session'
   const [activeView, setActiveView] = useState<'home' | 'live-session'>('home');
@@ -31,7 +38,15 @@ export default function App() {
   const [isAppLoading, setIsAppLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Loading Veda AI Biomechanics Studio...');
 
-  // Flag to trigger entry animation ONLY on initial sign-in, suppressed after session completion
+  // Full-screen Session Loading Transition (Launch & Exit)
+  const [sessionTransition, setSessionTransition] = useState<{
+    mode: 'launch' | 'exit';
+    targetPoseName?: string;
+    customMessage?: string;
+    onComplete: () => void;
+  } | null>(null);
+
+  // Flag to trigger entry animation ONLY on initial sign-in
   const [isInitialSignInAnimation, setIsInitialSignInAnimation] = useState(false);
 
   // Pending session start queue
@@ -46,15 +61,40 @@ export default function App() {
   const [inspectingPose, setInspectingPose] = useState<YogaPose | null>(null);
   const [completedSession, setCompletedSession] = useState<PracticeSession | null>(null);
 
-  // Load existing user profile on mount
+  // Load user profile from API on mount (if JWT token exists)
   useEffect(() => {
-    const existing = getStoredUserProfile();
-    if (existing) {
-      setUserProfile(existing);
+    async function loadProfile() {
+      const token = getToken();
+      if (token) {
+        const profile = await fetchUserProfileFromAPI();
+        if (profile) {
+          setUserProfile(profile);
+        }
+      } else {
+        // Check localStorage fallback
+        const cached = getStoredUserProfile();
+        if (cached) setUserProfile(cached);
+      }
     }
+    loadProfile();
   }, []);
 
-  // Helper to trigger animated loading transition during view switches
+  // Load poses from API
+  useEffect(() => {
+    async function loadPoses() {
+      try {
+        const apiPoses = await fetchPosesFromAPI();
+        if (apiPoses.length > 0) {
+          setPoses(apiPoses);
+        }
+      } catch {
+        // Fallback already set
+      }
+    }
+    loadPoses();
+  }, []);
+
+  // Helper to trigger animated loading transition
   const triggerViewTransition = (targetView: 'home' | 'live-session', message: string, callback?: () => void) => {
     setLoadingMessage(message);
     setIsAppLoading(true);
@@ -67,14 +107,30 @@ export default function App() {
     }, 700);
   };
 
+  // Exit session handler with dedicated exit loading animation screen
+  const handleExitSession = (callback?: () => void) => {
+    sessionStorage.setItem('asana_exited_session', 'true');
+    setIsInitialSignInAnimation(false);
+    setSessionTransition({
+      mode: 'exit',
+      customMessage: 'Returning to Sanctuary Dashboard...',
+      onComplete: () => {
+        setSessionTransition(null);
+        setActiveView('home');
+        if (callback) callback();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+    });
+  };
+
   // Handle smooth scroll to section
   const handleScrollToSection = (id: string) => {
     if (activeView !== 'home') {
-      triggerViewTransition('home', 'Returning to Home Dashboard...', () => {
+      handleExitSession(() => {
         setTimeout(() => {
           const el = document.getElementById(id);
           if (el) el.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
+        }, 150);
       });
     } else {
       const el = document.getElementById(id);
@@ -82,9 +138,8 @@ export default function App() {
     }
   };
 
-  // Central Session Trigger: enforces Auth -> Onboarding Questionnaire -> Live Session
+  // Central Session Trigger: launches Live Session with launch loading screen
   const handleInitiateSession = (poseId?: string) => {
-    // 1. Check if user is authenticated
     if (!userProfile) {
       setPendingPoseId(poseId);
       setPendingStartSession(true);
@@ -93,45 +148,40 @@ export default function App() {
       return;
     }
 
-    // Record session entry in browser session storage
     sessionStorage.setItem('asana_entered_session', 'true');
     setIsInitialSignInAnimation(false);
 
-    // 2. Check if user has answered the onboarding questionnaire
-    if (!userProfile.hasCompletedOnboarding) {
-      setPendingPoseId(poseId);
-      setOnboardingModalOpen(true);
-      return;
-    }
-
-    // 3. User is authenticated & onboarded -> Start Live Session directly with transition
     setSessionInitialPoseId(poseId);
     setInspectingPose(null);
-    triggerViewTransition('live-session', 'Initializing Live Posture Studio...', () => {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    const targetPose = poses.find((p) => p.id === poseId);
+
+    setSessionTransition({
+      mode: 'launch',
+      targetPoseName: targetPose?.name,
+      onComplete: () => {
+        setSessionTransition(null);
+        setActiveView('live-session');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
     });
   };
 
-  // Open Auth modal directly
   const handleOpenAuth = (mode: 'signin' | 'signup' = 'signup') => {
     setAuthMode(mode);
     setAuthModalOpen(true);
   };
 
-  // On Auth success: trigger initial sign-in entry animation flag & record session storage
+  // On Auth success
   const handleAuthSuccess = (profile: UserProfile) => {
     setUserProfile(profile);
+    saveUserProfile(profile);
     sessionStorage.setItem('asana_signed_in', 'true');
     sessionStorage.removeItem('asana_entered_session');
     sessionStorage.removeItem('asana_exited_session');
     sessionStorage.removeItem('asana_generated_report');
     setIsInitialSignInAnimation(true);
 
-    if (!profile.hasCompletedOnboarding) {
-      // Immediately open the 3 AI Personalization Questions on Sign Up
-      setOnboardingModalOpen(true);
-    } else if (pendingStartSession) {
-      // If already onboarded and they clicked start session, launch live session
+    if (pendingStartSession) {
       setPendingStartSession(false);
       const poseToUse = pendingPoseId;
       setPendingPoseId(undefined);
@@ -142,15 +192,17 @@ export default function App() {
       triggerViewTransition('live-session', 'Preparing Live Studio...', () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
       });
+    } else if (!profile.has_completed_onboarding && !profile.hasCompletedOnboarding) {
+      setOnboardingModalOpen(true);
     }
   };
 
   // On Pre-Session Questionnaire Complete
   const handleOnboardingComplete = (updatedProfile: UserProfile) => {
     setUserProfile(updatedProfile);
+    saveUserProfile(updatedProfile);
     setOnboardingModalOpen(false);
-    
-    // If user was initiating a session (or just completed setup), launch session
+
     const poseToUse = pendingPoseId;
     const shouldStart = pendingStartSession || Boolean(poseToUse);
     setPendingStartSession(false);
@@ -167,18 +219,53 @@ export default function App() {
     }
   };
 
-  // On Session finished -> Store session record, open master report modal & SUPPRESS entry animation
+  // On Session finished: synthesize report and open as in-session overlay directly over the active session
   const handleSessionFinished = (session: PracticeSession) => {
-    saveSessionRecord(session);
-    setCompletedSession(session);
-    sessionStorage.setItem('asana_generated_report', 'true');
-    // Keep activeView as 'live-session' so background shows LivePostureSession and returning to session resumes instantly
     setIsInitialSignInAnimation(false);
-    const updated = getStoredUserProfile();
-    if (updated) setUserProfile(updated);
+    setSessionTransition({
+      mode: 'exit',
+      customMessage: 'Synthesizing Groq AI Posture Insights & Report...',
+      onComplete: () => {
+        setSessionTransition(null);
+        setCompletedSession(session);
+        // In-Session Overlay: keep activeView in live-session so "Return to Session" preserves state
+        sessionStorage.setItem('asana_generated_report', 'true');
+        window.scrollTo({ top: 0 });
+
+        // Persist + refresh stats in the background so a slow/failed network never blocks the report
+        void (async () => {
+          try {
+            await saveSessionRecord(session);
+          } catch (err) {
+            console.warn('[App] Failed to save session record:', err);
+          }
+          try {
+            const updated = await fetchUserProfileFromAPI();
+            if (updated) setUserProfile(updated);
+          } catch (err) {
+            console.warn('[App] Failed to refresh profile:', err);
+          }
+        })();
+      },
+    });
   };
 
-  // Calculate session cookie / storage flag for Hero pointer animation
+  // Close the report (X, footer button, backdrop, Escape, Exit to Dashboard):
+  // always plays the exit loading screen. The report stays mounted underneath until the
+  // transition finishes so the viewport never flashes blank.
+  const handleCloseReport = () => {
+    if (sessionTransition) return; // already exiting
+    handleExitSession(() => setCompletedSession(null));
+  };
+
+  // Handle logout
+  const handleLogout = () => {
+    apiLogout();
+    setUserProfile(null);
+    setProfileModalOpen(false);
+  };
+
+  // Session storage flags for Hero animation
   const userSignedInStorage = sessionStorage.getItem('asana_signed_in') === 'true';
   const userEnteredStorage = sessionStorage.getItem('asana_entered_session') === 'true';
   const userExitedStorage = sessionStorage.getItem('asana_exited_session') === 'true';
@@ -192,10 +279,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col font-sans selection:bg-emerald-200 selection:text-emerald-900">
-      {/* Centralized App Router Loading Screen */}
       {isAppLoading && <AppLoading message={loadingMessage} />}
 
-      {/* Top Navigation */}
       {activeView === 'home' && (
         <Navbar
           userProfile={userProfile}
@@ -206,22 +291,22 @@ export default function App() {
         />
       )}
 
-      {/* Main View Router */}
       {activeView === 'live-session' ? (
-        <LivePostureSession
-          userProfile={userProfile}
-          initialPoseId={sessionInitialPoseId}
-          onFinishSession={handleSessionFinished}
-          onClose={() => {
-            sessionStorage.setItem('asana_exited_session', 'true');
-            setIsInitialSignInAnimation(false);
-            setActiveView('home');
-          }}
-          onOpenAuth={() => handleOpenAuth('signup')}
-        />
+        <ErrorBoundary
+          fullScreen
+          fallbackMessage="Unable to display the live yoga studio. Returning you safely to the home dashboard."
+          onReset={() => handleExitSession()}
+        >
+          <LivePostureSession
+            userProfile={userProfile}
+            initialPoseId={sessionInitialPoseId}
+            onFinishSession={handleSessionFinished}
+            onClose={() => handleExitSession()}
+            onOpenAuth={() => handleOpenAuth('signup')}
+          />
+        </ErrorBoundary>
       ) : (
         <main className="flex-1">
-          {/* Hero Section */}
           <HeroSection
             userProfile={userProfile}
             isInitialSignInAnimation={showLaunchAnimation}
@@ -229,8 +314,6 @@ export default function App() {
             onOpenAuth={handleOpenAuth}
             onExplorePoses={() => handleScrollToSection('pose-carousel-showcase')}
           />
-
-          {/* 8 Poses Carousel Showcase */}
           <PoseCarousel
             userProfile={userProfile}
             onSelectPoseForPractice={(pose) => handleInitiateSession(pose.id)}
@@ -243,8 +326,6 @@ export default function App() {
             }}
             onOpenAuth={() => handleOpenAuth('signup')}
           />
-
-          {/* Feature Columns Highlighting Core Pillars */}
           <FeatureColumns
             onOpenLivePractice={() => handleInitiateSession(undefined)}
             onOpenAuth={() => handleOpenAuth('signup')}
@@ -253,7 +334,6 @@ export default function App() {
         </main>
       )}
 
-      {/* Footer */}
       {activeView === 'home' && (
         <Footer
           onScrollTo={handleScrollToSection}
@@ -261,7 +341,6 @@ export default function App() {
         />
       )}
 
-      {/* Auth Modal (Sign In / Sign Up & 1-Click Test Account) */}
       <AuthModal
         isOpen={authModalOpen}
         initialMode={authMode}
@@ -272,7 +351,6 @@ export default function App() {
         onAuthSuccess={handleAuthSuccess}
       />
 
-      {/* Pre-Session Questionnaire Modal (Age, Experience, Live BMI with Animated Emojis) */}
       {userProfile && (
         <PreSessionOnboardingModal
           isOpen={onboardingModalOpen}
@@ -285,19 +363,17 @@ export default function App() {
         />
       )}
 
-      {/* User Encrypted Profile Vault Modal */}
       {userProfile && (
         <UserProfileModal
           user={userProfile}
           isOpen={profileModalOpen}
           onClose={() => setProfileModalOpen(false)}
-          onLogout={() => setUserProfile(null)}
+          onLogout={handleLogout}
           onSelectPastSession={(sess) => setCompletedSession(sess)}
           onOpenOnboarding={() => setOnboardingModalOpen(true)}
         />
       )}
 
-      {/* Pose Inspector Modal */}
       {inspectingPose && (
         <PoseDetailModal
           pose={inspectingPose}
@@ -306,34 +382,53 @@ export default function App() {
         />
       )}
 
-      {/* Session Final Master Report Modal */}
       {completedSession && (
-        <SessionReportModal
-          session={completedSession}
-          userProfile={userProfile}
-          onClose={() => setCompletedSession(null)}
-          onReturnToSession={() => {
-            setCompletedSession(null);
-            if (activeView !== 'live-session') {
-              triggerViewTransition('live-session', 'Resuming Live Posture Session...', () => {
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              });
-            }
-          }}
-          onExitToDashboard={() => {
-            setCompletedSession(null);
-            sessionStorage.setItem('asana_exited_session', 'true');
-            setIsInitialSignInAnimation(false);
-            triggerViewTransition('home', 'Returning to Home Dashboard...');
-          }}
-          onOpenAuth={() => {
-            setCompletedSession(null);
-            handleOpenAuth('signup');
-          }}
-          onRestartPractice={() => {
-            setCompletedSession(null);
-            handleInitiateSession(undefined);
-          }}
+        <ErrorBoundary
+          fullScreen
+          fallbackMessage="Unable to render the session report at this moment. Your practice data has been safely recorded in your history."
+          onReset={() => setCompletedSession(null)}
+        >
+          <SessionReportModal
+            session={completedSession}
+            userProfile={userProfile}
+            onClose={() => setCompletedSession(null)}
+            // 1. Continue in session: simply hides the modal overlay; activeView stays 'live-session'
+            onReturnToSession={() => {
+              setCompletedSession(null);
+              if (activeView !== 'live-session') {
+                setActiveView('live-session');
+              }
+            }}
+            // 2. Exit session: closes report and switches back to home dashboard
+            onExitToDashboard={() => {
+              setCompletedSession(null);
+              sessionStorage.setItem('asana_exited_session', 'true');
+              if (activeView === 'live-session') {
+                handleExitSession();
+              } else {
+                setActiveView('home');
+              }
+            }}
+            onOpenAuth={() => {
+              setCompletedSession(null);
+              handleOpenAuth('signup');
+            }}
+            onRestartPractice={() => {
+              setCompletedSession(null);
+              handleInitiateSession(undefined);
+            }}
+          />
+        </ErrorBoundary>
+      )}
+
+      {/* Rendered last so it always sits above the report modal & other overlays */}
+      {/* Dedicated Animated Launch & Exit Telemetry Transition */}
+      {sessionTransition && (
+        <SessionLoadingTransition
+          mode={sessionTransition.mode}
+          targetPoseName={sessionTransition.targetPoseName}
+          customMessage={sessionTransition.customMessage}
+          onComplete={sessionTransition.onComplete}
         />
       )}
     </div>

@@ -36,6 +36,7 @@ export const PoseVisualArtwork: React.FC<PoseVisualArtworkProps> = ({
     );
   }
   switch (poseId) {
+    case 'tree':
     case 'tree-pose':
       return (
         <svg viewBox="0 0 200 240" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -74,40 +75,51 @@ export const PoseVisualArtwork: React.FC<PoseVisualArtworkProps> = ({
         </svg>
       );
 
+    case 'warrior':
+    case 'warrior-3':
     case 'warrior-2':
       return (
         <svg viewBox="0 0 240 200" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
           <circle cx="120" cy="100" r="90" fill="#3B82F6" fillOpacity="0.08" />
           <path d="M30 185 L210 185" stroke="#3B82F6" strokeWidth="3" strokeLinecap="round" strokeDasharray="4 4" />
           
-          {/* Head looking over front fingertips */}
-          <circle cx="120" cy="40" r="14" fill="#1E40AF" />
+          {/* Head & Neck (Neutral gaze toward floor) */}
+          <circle cx="75" cy="85" r="13" fill="#1E40AF" />
           
-          {/* Torso stacked vertical */}
-          <path d="M120 54 L120 115" stroke="#2563EB" strokeWidth="7" strokeLinecap="round" />
+          {/* Horizontal Spine & Torso */}
+          <path d="M130 95 L80 95" stroke="#2563EB" strokeWidth="7" strokeLinecap="round" />
           
-          {/* Arms extended horizontal */}
-          <path d="M50 72 L120 70 L195 72" stroke="#3B82F6" strokeWidth="6" strokeLinecap="round" />
+          {/* Arms Reaching Forward alongside ears */}
+          <path d="M80 95 L25 95" stroke="#3B82F6" strokeWidth="6" strokeLinecap="round" />
           
-          {/* Front Leg bent at 90 deg */}
-          <path d="M120 115 L175 115 L175 185" stroke="#1D4ED8" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
+          {/* Lifted Back Leg (Horizontal parallel to floor) */}
+          <path d="M130 95 L215 95" stroke="#2563EB" strokeWidth="7" strokeLinecap="round" />
+          {/* Flexed Back Foot */}
+          <path d="M215 95 L215 85" stroke="#1D4ED8" strokeWidth="5" strokeLinecap="round" />
           
-          {/* Back Leg straight & extended */}
-          <path d="M120 115 L60 185" stroke="#2563EB" strokeWidth="7" strokeLinecap="round" />
+          {/* Grounded Standing Leg (Vertical column with microbend) */}
+          <path d="M130 95 L130 140 L130 185" stroke="#1D4ED8" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
           
           {highlightJoints && (
             <>
-              {/* 90 deg knee angle */}
-              <circle cx="175" cy="115" r="5" fill="#10B981" />
-              {/* Back foot anchor */}
-              <circle cx="60" cy="185" r="5" fill="#3B82F6" />
-              {/* Vertical alignment line */}
-              <line x1="120" y1="30" x2="120" y2="140" stroke="#F59E0B" strokeWidth="2" strokeDasharray="3 3" />
+              {/* Horizontal 180° T-shape balance axis */}
+              <line x1="25" y1="95" x2="215" y2="95" stroke="#10B981" strokeWidth="2" strokeDasharray="3 3" />
+              {/* Squared Pelvis / Hip Pivot */}
+              <circle cx="130" cy="95" r="5" fill="#F59E0B" />
+              {/* Standing Knee Microbend Checkpoint */}
+              <circle cx="130" cy="140" r="4" fill="#10B981" />
+              {/* Rooted Standing Foot */}
+              <circle cx="130" cy="185" r="5" fill="#3B82F6" />
+              {/* Extended Fingertips */}
+              <circle cx="25" cy="95" r="4" fill="#10B981" />
+              {/* Energized Back Heel */}
+              <circle cx="215" cy="85" r="4" fill="#10B981" />
             </>
           )}
         </svg>
       );
 
+    case 'dog':
     case 'downward-dog':
       return (
         <svg viewBox="0 0 240 200" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -139,6 +151,7 @@ export const PoseVisualArtwork: React.FC<PoseVisualArtworkProps> = ({
         </svg>
       );
 
+    case 'cobra':
     case 'cobra-pose':
       return (
         <svg viewBox="0 0 240 180" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -167,6 +180,7 @@ export const PoseVisualArtwork: React.FC<PoseVisualArtworkProps> = ({
         </svg>
       );
 
+    case 'triangle':
     case 'triangle-pose':
       return (
         <svg viewBox="0 0 240 200" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -193,6 +207,91 @@ export const PoseVisualArtwork: React.FC<PoseVisualArtworkProps> = ({
               <circle cx="70" cy="150" r="4" fill="#10B981" />
               {/* Open chest line */}
               <line x1="80" y1="35" x2="80" y2="180" stroke="#10B981" strokeWidth="2" strokeDasharray="3 3" />
+            </>
+          )}
+        </svg>
+      );
+
+    case 'chair':
+    case 'chair-pose':
+      return (
+        <svg viewBox="0 0 240 220" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="120" cy="110" r="90" fill="#F97316" fillOpacity="0.08" />
+          <path d="M30 200 L210 200" stroke="#F97316" strokeWidth="3" strokeLinecap="round" strokeDasharray="4 4" />
+          
+          {/* Head & Neck */}
+          <circle cx="100" cy="55" r="14" fill="#C2410C" />
+          
+          {/* Angled Torso & Spine */}
+          <path d="M100 68 L145 130" stroke="#EA580C" strokeWidth="7" strokeLinecap="round" />
+          
+          {/* Extended Overhead Arms */}
+          <path d="M110 82 L65 32" stroke="#F97316" strokeWidth="6" strokeLinecap="round" />
+          
+          {/* Thighs (hips pushed back, parallel to ground) */}
+          <path d="M145 130 L95 135" stroke="#EA580C" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
+          
+          {/* Shins & Feet rooted to floor */}
+          <path d="M95 135 L95 200" stroke="#C2410C" strokeWidth="7" strokeLinecap="round" />
+          
+          {highlightJoints && (
+            <>
+              {/* Knee safe alignment (not surpassing toes) */}
+              <circle cx="95" cy="135" r="5" fill="#10B981" />
+              {/* Weight in heels check */}
+              <circle cx="95" cy="200" r="4" fill="#3B82F6" />
+              {/* Hip hinge checkpoint */}
+              <circle cx="145" cy="130" r="5" fill="#F59E0B" />
+              {/* Arms alignment line */}
+              <line x1="145" y1="130" x2="65" y2="32" stroke="#10B981" strokeWidth="2" strokeDasharray="3 3" />
+            </>
+          )}
+        </svg>
+      );
+
+    case 'shoulder_stand':
+    case 'shoulderstand':
+    case 'shoulder-stand':
+    case 'shoudler_stand':
+      return (
+        <svg viewBox="0 0 200 240" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="100" cy="120" r="90" fill="#6366F1" fillOpacity="0.08" />
+          <path d="M30 215 L170 215" stroke="#6366F1" strokeWidth="3" strokeLinecap="round" strokeDasharray="4 4" />
+          
+          {/* Head resting grounded on floor */}
+          <circle cx="100" cy="205" r="13" fill="#3730A3" />
+          
+          {/* Supporting Shoulders */}
+          <path d="M75 195 L125 195" stroke="#4F46E5" strokeWidth="6" strokeLinecap="round" />
+          
+          {/* Upper Arms to Elbows on ground */}
+          <path d="M75 195 L65 215" stroke="#6366F1" strokeWidth="5" strokeLinecap="round" />
+          <path d="M125 195 L135 215" stroke="#6366F1" strokeWidth="5" strokeLinecap="round" />
+          
+          {/* Forearms supporting back */}
+          <path d="M65 215 L88 160" stroke="#818CF8" strokeWidth="5" strokeLinecap="round" />
+          <path d="M135 215 L112 160" stroke="#818CF8" strokeWidth="5" strokeLinecap="round" />
+          
+          {/* Vertical Lifted Torso & Pelvis */}
+          <path d="M100 192 L100 130" stroke="#4F46E5" strokeWidth="7" strokeLinecap="round" />
+          
+          {/* Straight Vertical Legs extending to sky */}
+          <path d="M100 130 L100 45" stroke="#4338CA" strokeWidth="7" strokeLinecap="round" />
+          
+          {/* Pointed Toes / Feet */}
+          <path d="M96 45 L100 30 L104 45" stroke="#6366F1" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+          
+          {highlightJoints && (
+            <>
+              {/* Vertical alignment plumbline */}
+              <line x1="100" y1="205" x2="100" y2="30" stroke="#10B981" strokeWidth="2" strokeDasharray="3 3" />
+              {/* Cervical spine safety marker (no weight on neck) */}
+              <circle cx="100" cy="192" r="4" fill="#EF4444" stroke="#FFFFFF" strokeWidth="1" />
+              {/* Elbow anchor points */}
+              <circle cx="65" cy="215" r="4" fill="#10B981" />
+              <circle cx="135" cy="215" r="4" fill="#10B981" />
+              {/* High vertical extension */}
+              <circle cx="100" cy="30" r="4" fill="#F59E0B" />
             </>
           )}
         </svg>

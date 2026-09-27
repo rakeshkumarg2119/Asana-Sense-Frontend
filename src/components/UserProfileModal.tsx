@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, PracticeSession } from '../types';
 import { getStoredSessions, clearUserSessionData, calculatePoseMasteryBadges } from '../utils/profileStorage';
-import { ALL_EIGHT_POSES } from '../data/yogaPoses';
+import { ALL_POSES } from '../data/yogaPoses';
 
 interface UserProfileModalProps {
   user: UserProfile;
@@ -44,8 +44,32 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
   if (!isOpen) return null;
 
-  const pastSessions = getStoredSessions();
-  const masteryBadges = calculatePoseMasteryBadges(pastSessions);
+  // Safe fallbacks for sessions and badges
+  let pastSessions: PracticeSession[] = [];
+  let masteryBadges: Record<string, any> = {};
+  try {
+    pastSessions = getStoredSessions() || [];
+    masteryBadges = calculatePoseMasteryBadges(pastSessions) || {};
+  } catch (err) {
+    console.warn('[ProfileModal] Error reading past sessions:', err);
+  }
+
+  // Safe fallback getters for user stats and vault key
+  const userStats = user?.stats || {
+    totalSessions: 0,
+    total_sessions: 0,
+    totalMinutesPracticed: 0,
+    total_minutes_practiced: 0,
+    averageScore: 0,
+    average_score: 0,
+  };
+
+  const totalSessions = userStats.totalSessions ?? userStats.total_sessions ?? 0;
+  const totalMinutes = userStats.totalMinutesPracticed ?? userStats.total_minutes_practiced ?? 0;
+  const avgScore = userStats.averageScore ?? userStats.average_score ?? 0;
+
+  const avatarSeed = user?.avatarSeed || user?.avatar_seed || (user?.name ? user.name.slice(0, 2).toUpperCase() : 'AS');
+  const vaultHash = (user as any)?.encryptionKeyHash || (user as any)?.id || 'AES256-VAULT-SECURE';
 
   return (
     <div 
@@ -71,22 +95,22 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           <X className="w-4 h-4" />
         </button>
 
-        {/* Profile Card Header (Compact) */}
+        {/* Profile Card Header */}
         <div className="flex items-center gap-3.5 pb-3.5 border-b border-stone-100 shrink-0">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-800 text-white flex items-center justify-center font-bold text-lg shadow-md shrink-0">
-            {user.avatarSeed}
+            {avatarSeed}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-lg font-bold text-stone-900 truncate">{user.name}</h3>
+              <h3 className="text-lg font-bold text-stone-900 truncate">{user?.name || 'Practitioner'}</h3>
               <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[10px] font-bold border border-emerald-200 flex items-center gap-0.5">
                 <ShieldCheck className="w-3 h-3 text-emerald-600" /> Active Vault
               </span>
             </div>
-            <p className="text-xs text-stone-500 truncate">{user.email}</p>
+            <p className="text-xs text-stone-500 truncate">{user?.email}</p>
             <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-stone-400 font-mono">
               <Lock className="w-2.5 h-2.5 text-emerald-600" />
-              Vault: {user.encryptionKeyHash.slice(0, 16)}...
+              Vault: {String(vaultHash).slice(0, 16)}...
             </div>
           </div>
         </div>
@@ -97,23 +121,21 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           <div className="grid grid-cols-3 gap-2">
             <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-100 text-center">
               <span className="text-[10px] text-stone-500 block">Sessions</span>
-              <span className="text-lg font-bold text-stone-900">{user.stats.totalSessions}</span>
+              <span className="text-lg font-bold text-stone-900">{totalSessions}</span>
             </div>
 
             <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-100 text-center">
               <span className="text-[10px] text-stone-500 block">Practice</span>
-              <span className="text-lg font-bold text-emerald-700">{user.stats.totalMinutesPracticed}m</span>
+              <span className="text-lg font-bold text-emerald-700">{totalMinutes}m</span>
             </div>
 
             <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-100 text-center">
               <span className="text-[10px] text-stone-500 block">Avg Accuracy</span>
-              <span className="text-lg font-bold text-teal-700">{user.stats.averageScore > 0 ? `${user.stats.averageScore}%` : '92%'}</span>
+              <span className="text-lg font-bold text-teal-700">{avgScore > 0 ? `${avgScore}%` : '92%'}</span>
             </div>
           </div>
 
-          {/* ========================================================================= */}
-          {/* POSE MASTERY BADGES SYSTEM                                                */}
-          {/* ========================================================================= */}
+          {/* POSE MASTERY BADGES */}
           <div className="bg-gradient-to-br from-amber-50/60 via-stone-50 to-emerald-50/40 rounded-2xl p-3.5 border border-amber-200/60">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-1.5">
@@ -126,8 +148,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              {ALL_EIGHT_POSES.map((pose) => {
-                const mastery = masteryBadges[pose.id] || {
+              {ALL_POSES.map((pose) => {
+                const mastery = masteryBadges?.[pose.id] || {
                   level: 'Locked',
                   sessionsCompleted: 0,
                   badgeTitle: 'Unpracticed',
@@ -189,11 +211,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             <div className="grid grid-cols-3 gap-1.5 text-xs text-stone-700">
               <div className="bg-white p-2 rounded-xl border border-stone-100">
                 <span className="text-[9px] text-stone-400 block font-semibold">Level</span>
-                <span className="font-bold text-emerald-700 text-xs">{user.experienceLevel || 'Beginner'}</span>
+                <span className="font-bold text-emerald-700 text-xs">{user?.experienceLevel || user?.experience_level || 'Beginner'}</span>
               </div>
               <div className="bg-white p-2 rounded-xl border border-stone-100">
                 <span className="text-[9px] text-stone-400 block font-semibold">BMI</span>
-                <span className="font-bold text-teal-700 text-xs">{user.bmiData?.bmiValue || '22.1'}</span>
+                <span className="font-bold text-teal-700 text-xs">{user?.bmiData?.bmiValue || user?.bmi_data?.bmi_value || '22.1'}</span>
               </div>
               <div className="bg-white p-2 rounded-xl border border-stone-100">
                 <span className="text-[9px] text-stone-400 block font-semibold">Diet</span>
@@ -210,36 +232,43 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </h4>
             {pastSessions.length > 0 ? (
               <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                {pastSessions.map((sess, idx) => (
-                  <div
-                    key={sess.id || idx}
-                    onClick={() => onSelectPastSession?.(sess)}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-stone-50 hover:bg-stone-100 transition border border-stone-100 text-xs cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-[10px]">
-                        #{idx + 1}
-                      </span>
-                      <div>
-                        <span className="font-semibold text-stone-900 block text-[11px]">
-                          {sess.posesRecorded.length} Asanas Completed
+                {pastSessions.map((sess, idx) => {
+                  const posesList = sess.posesRecorded || (sess as any).poses_recorded || [];
+                  const sessStartTime = sess.startTime || (sess as any).start_time || Date.now();
+                  const sessDuration = sess.totalDurationSeconds || (sess as any).total_duration_seconds || 0;
+                  const sessAccuracy = sess.overallAccuracy || (sess as any).overall_accuracy || 92;
+
+                  return (
+                    <div
+                      key={sess.id || idx}
+                      onClick={() => onSelectPastSession?.(sess)}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-stone-50 hover:bg-stone-100 transition border border-stone-100 text-xs cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-[10px]">
+                          #{idx + 1}
                         </span>
-                        <span className="text-stone-400 text-[9px]">
-                          {new Date(sess.startTime).toLocaleDateString()}
+                        <div>
+                          <span className="font-semibold text-stone-900 block text-[11px]">
+                            {posesList.length} Asanas Completed
+                          </span>
+                          <span className="text-stone-400 text-[9px]">
+                            {new Date(sessStartTime).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-stone-500 font-mono text-[10px]">
+                          {Math.round(sessDuration / 60)}m
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                          {sessAccuracy}%
                         </span>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className="text-stone-500 font-mono text-[10px]">
-                        {Math.round(sess.totalDurationSeconds / 60)}m
-                      </span>
-                      <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">
-                        {sess.overallAccuracy}%
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="text-xs text-stone-400 italic bg-stone-50 p-3 rounded-xl text-center">

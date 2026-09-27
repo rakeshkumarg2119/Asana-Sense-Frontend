@@ -21,86 +21,83 @@ export interface AutoPoseItem {
 
 export const AUTO_POSES: AutoPoseItem[] = [
   {
-    id: 'tree-pose',
-    name: 'Tree Pose',
-    sanskritName: 'Vrksasana',
-    imageUrl: 'https://images.unsplash.com/photo-1545205597-3d9d02c29597?auto=format&fit=crop&w=800&q=80',
-    accuracyScore: 94.8,
+    id: 'chair-pose',
+    name: 'Chair Pose',
+    sanskritName: 'Utkatasana',
+    imageUrl: 'https://res.cloudinary.com/yhj7u0bn/image/upload/v1789033782/Chair_pose.png',
+    accuracyScore: 93.4,
     accuracyCategory: 'Optimal',
-    accuracyBarWidth: '94.8%',
-    coachingTip: 'Ground through standing foot; engage core for steady lumbar support.',
-    topTag: 'Spine: 180° Aligned',
-    bottomTag: 'Knee Safe: Upper Thigh',
+    accuracyBarWidth: '93.4%',
+    coachingTip: 'Sink weight into heels; keep spine elongated with arms reaching overhead alongside ears.',
+    topTag: 'Spine: Neutral & Long',
+    bottomTag: 'Knees: Behind Toes',
     jointLines: [
-      // MediaPipe Upper Body / Arms Overhead (Pranam)
-      { x1: '50%', y1: '12%', x2: '41%', y2: '20%' }, // Wrists to Left Elbow
-      { x1: '50%', y1: '12%', x2: '59%', y2: '20%' }, // Wrists to Right Elbow
-      { x1: '41%', y1: '20%', x2: '44%', y2: '30%' }, // Left Elbow to Left Shoulder
-      { x1: '59%', y1: '20%', x2: '56%', y2: '30%' }, // Right Elbow to Right Shoulder
-      { x1: '44%', y1: '30%', x2: '56%', y2: '30%' }, // Shoulder Line
+      // MediaPipe Upper Body / Arms Overhead alongside ears
+      { x1: '40%', y1: '14%', x2: '47%', y2: '24%' }, // L Fingertips to L Elbow
+      { x1: '47%', y1: '24%', x2: '54%', y2: '34%' }, // L Elbow to L Shoulder
+      { x1: '44%', y1: '14%', x2: '51%', y2: '24%' }, // R Fingertips to R Elbow
+      { x1: '51%', y1: '24%', x2: '58%', y2: '34%' }, // R Elbow to R Shoulder
+      { x1: '54%', y1: '34%', x2: '58%', y2: '34%' }, // Shoulder Line
       // MediaPipe Torso (Shoulders to Hips)
-      { x1: '44%', y1: '30%', x2: '46%', y2: '54%' }, // Left Spine/Torso
-      { x1: '56%', y1: '30%', x2: '54%', y2: '54%' }, // Right Spine/Torso
-      { x1: '46%', y1: '54%', x2: '54%', y2: '54%' }, // Hip Line
-      // MediaPipe Right Standing Leg
-      { x1: '54%', y1: '54%', x2: '54%', y2: '73%' }, // Right Hip to Right Knee
-      { x1: '54%', y1: '73%', x2: '54%', y2: '92%' }, // Right Knee to Right Ankle
-      // MediaPipe Left Bent Leg (Foot to Inner Thigh)
-      { x1: '46%', y1: '54%', x2: '30%', y2: '63%' }, // Left Hip to Left Knee Out
-      { x1: '30%', y1: '63%', x2: '52%', y2: '63%' }, // Left Knee to Left Foot on Thigh
+      { x1: '54%', y1: '34%', x2: '60%', y2: '56%' }, // L Spine/Torso
+      { x1: '58%', y1: '34%', x2: '64%', y2: '56%' }, // R Spine/Torso
+      { x1: '60%', y1: '56%', x2: '64%', y2: '56%' }, // Hip Line
+      // MediaPipe Thighs (Hips to Knees)
+      { x1: '60%', y1: '56%', x2: '44%', y2: '67%' }, // L Hip to L Knee
+      { x1: '64%', y1: '56%', x2: '48%', y2: '67%' }, // R Hip to R Knee
+      // MediaPipe Shins (Knees to Ankles)
+      { x1: '44%', y1: '67%', x2: '47%', y2: '90%' }, // L Knee to L Ankle
+      { x1: '48%', y1: '67%', x2: '51%', y2: '90%' }, // R Knee to R Ankle
     ],
     jointPoints: [
-      { cx: '50%', cy: '12%', label: 'Overhead Palms' },
-      { cx: '50%', cy: '23%', label: 'Nose' },
-      { cx: '44%', cy: '30%', label: 'L Shoulder' },
-      { cx: '56%', cy: '30%', label: 'R Shoulder' },
-      { cx: '30%', cy: '63%', label: 'L Knee 90°' },
-      { cx: '54%', cy: '73%', label: 'R Knee Lock' },
-      { cx: '54%', cy: '92%', label: 'R Ankle Root' },
+      { cx: '42%', cy: '14%', label: 'Overhead Reach' },
+      { cx: '50%', cy: '26%', label: 'Drishti / Gaze' },
+      { cx: '56%', cy: '34%', label: 'Shoulders Down' },
+      { cx: '62%', cy: '56%', label: 'Pelvis Tucked' },
+      { cx: '46%', cy: '67%', label: 'Knee Depth' },
+      { cx: '49%', cy: '90%', label: 'Weight in Heels' },
     ],
   },
   {
-    id: 'warrior-2',
-    name: 'Warrior II',
-    sanskritName: 'Virabhadrasana II',
-    imageUrl: 'https://images.unsplash.com/photo-1506126613408-eca07ce68773?auto=format&fit=crop&w=800&q=80',
-    accuracyScore: 89.2,
-    accuracyCategory: 'Good Alignment',
-    accuracyBarWidth: '89.2%',
-    coachingTip: 'Stack front knee directly over ankle at 90°; extend fingertips level.',
-    topTag: 'Arms: 180° Horizontal',
-    bottomTag: 'Front Knee: 90° Square',
+    id: 'warrior-3',
+    name: 'Warrior III',
+    sanskritName: 'Virabhadrasana III',
+    imageUrl: 'https://res.cloudinary.com/yhj7u0bn/image/upload/v1789033718/Warrior-3-Arms-Forward-1200x800.jpg',
+    accuracyScore: 91.2,
+    accuracyCategory: 'Optimal',
+    accuracyBarWidth: '91.2%',
+    coachingTip: 'Form a continuous horizontal line from fingertips to flexed back heel; keep pelvis squared to the floor.',
+    topTag: 'Body: 180° T-Shape',
+    bottomTag: 'Hips: Squared to Mat',
     jointLines: [
-      // MediaPipe Arms (Left to Right Horizontal Line)
-      { x1: '10%', y1: '32%', x2: '25%', y2: '32%' }, // L Wrist to L Elbow
-      { x1: '25%', y1: '32%', x2: '40%', y2: '32%' }, // L Elbow to L Shoulder
-      { x1: '40%', y1: '32%', x2: '56%', y2: '32%' }, // L Shoulder to R Shoulder
-      { x1: '56%', y1: '32%', x2: '72%', y2: '32%' }, // R Shoulder to R Elbow
-      { x1: '72%', y1: '32%', x2: '88%', y2: '32%' }, // R Elbow to R Wrist
-      // MediaPipe Torso
-      { x1: '40%', y1: '32%', x2: '42%', y2: '58%' }, // L Shoulder to L Hip
-      { x1: '56%', y1: '32%', x2: '54%', y2: '58%' }, // R Shoulder to R Hip
-      { x1: '42%', y1: '58%', x2: '54%', y2: '58%' }, // Hip Line
-      // MediaPipe Front Leg (L Knee 90°)
-      { x1: '42%', y1: '58%', x2: '26%', y2: '60%' }, // L Hip to L Knee
-      { x1: '26%', y1: '60%', x2: '26%', y2: '86%' }, // L Knee to L Ankle
-      // MediaPipe Back Leg (R Leg Straight)
-      { x1: '54%', y1: '58%', x2: '72%', y2: '72%' }, // R Hip to R Knee
-      { x1: '72%', y1: '72%', x2: '86%', y2: '86%' }, // R Knee to R Ankle
+      // MediaPipe Arms Forward alongside ears
+      { x1: '12%', y1: '48%', x2: '24%', y2: '48%' }, // Fingertips to Wrists
+      { x1: '24%', y1: '48%', x2: '35%', y2: '48%' }, // Wrists to Elbows
+      { x1: '35%', y1: '48%', x2: '45%', y2: '48%' }, // Elbows to Shoulders
+      // MediaPipe Torso (Shoulders to Pelvis/Hips)
+      { x1: '45%', y1: '48%', x2: '58%', y2: '49%' }, // Spine / Torso horizontal
+      // MediaPipe Standing Leg (Vertical Column with Microbend)
+      { x1: '58%', y1: '49%', x2: '57%', y2: '70%' }, // Pelvis to Knee
+      { x1: '57%', y1: '70%', x2: '56%', y2: '92%' }, // Knee to Ankle
+      // MediaPipe Lifted Back Leg (Horizontal line to heel)
+      { x1: '58%', y1: '49%', x2: '74%', y2: '48%' }, // Pelvis to Lifted Knee
+      { x1: '74%', y1: '48%', x2: '90%', y2: '47%' }, // Lifted Knee to Flexed Heel
     ],
     jointPoints: [
-      { cx: '48%', cy: '20%', label: 'Drishti gaze' },
-      { cx: '10%', cy: '32%', label: 'L Fingertips' },
-      { cx: '88%', cy: '32%', label: 'R Fingertips' },
-      { cx: '26%', cy: '60%', label: 'Front Knee 90°' },
-      { cx: '86%', cy: '86%', label: 'Back Heel 45°' },
+      { cx: '12%', cy: '48%', label: 'Fingertips Reach' },
+      { cx: '40%', cy: '45%', label: 'Neutral Gaze' },
+      { cx: '45%', cy: '48%', label: 'Shoulders Flat' },
+      { cx: '58%', cy: '49%', label: 'Pelvis Squared' },
+      { cx: '57%', cy: '70%', label: 'Microbend Knee' },
+      { cx: '56%', cy: '92%', label: 'Rooted Base' },
+      { cx: '90%', cy: '47%', label: 'Back Heel Drive' },
     ],
   },
   {
     id: 'downward-dog',
     name: 'Downward Dog',
     sanskritName: 'Adho Mukha Svanasana',
-    imageUrl: 'https://images.unsplash.com/photo-1599447421416-3414500d18a5?auto=format&fit=crop&w=800&q=80',
+    imageUrl: 'https://res.cloudinary.com/yhj7u0bn/image/upload/v1789019346/downdog.jpg',
     accuracyScore: 96.1,
     accuracyCategory: 'Optimal',
     accuracyBarWidth: '96.1%',
@@ -127,7 +124,7 @@ export const AUTO_POSES: AutoPoseItem[] = [
     id: 'cobra-pose',
     name: 'Cobra Pose',
     sanskritName: 'Bhujangasana',
-    imageUrl: 'https://images.unsplash.com/photo-1575052814086-f385e2e2ad1b?auto=format&fit=crop&w=800&q=80',
+    imageUrl: 'https://res.cloudinary.com/yhj7u0bn/image/upload/v1789019345/cobro.avif',
     accuracyScore: 91.5,
     accuracyCategory: 'Optimal',
     accuracyBarWidth: '91.5%',
@@ -156,7 +153,7 @@ export const AUTO_POSES: AutoPoseItem[] = [
     id: 'triangle-pose',
     name: 'Triangle Pose',
     sanskritName: 'Trikonasana',
-    imageUrl: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&w=800&q=80',
+    imageUrl: 'https://res.cloudinary.com/yhj7u0bn/image/upload/v1789034482/1lFCiwdr0bqa_JDFaYD84M_TfvJ3RYy5mWpV0UfRTU7xWcEtRjbrG8vNowmL9pK1tWUVWng9jDML5TQJzC3i10hKS3JXMACiD_tV8sScPBGBF-Bhybv1Vw55Hvul60Z9pL09cCrP.jpg',
     accuracyScore: 87.6,
     accuracyCategory: 'Good Alignment',
     accuracyBarWidth: '87.6%',

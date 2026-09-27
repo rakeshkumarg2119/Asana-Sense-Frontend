@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { 
   Sparkles, 
@@ -17,15 +17,19 @@ interface SessionLoadingTransitionProps {
   mode: 'launch' | 'exit';
   onComplete: () => void;
   targetPoseName?: string;
+  customMessage?: string;
 }
 
 export const SessionLoadingTransition: React.FC<SessionLoadingTransitionProps> = ({
   mode,
   onComplete,
   targetPoseName,
+  customMessage,
 }) => {
   const [progress, setProgress] = useState(0);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   const launchSteps = [
     { title: 'Initializing Veda Vision Engine', desc: 'Calibrating joint landmark neural detector' },
@@ -37,14 +41,14 @@ export const SessionLoadingTransition: React.FC<SessionLoadingTransitionProps> =
   const exitSteps = [
     { title: 'Finalizing Hold Telemetry', desc: 'Calculating joint stability and hold accuracy' },
     { title: 'Encrypting Session Records', desc: 'Securing practice statistics in private vault' },
-    { title: 'Synthesizing Biomechanics Report', desc: 'Formatting personalized alignment cues' },
+    { title: 'Synthesizing Biomechanics Report', desc: customMessage || 'Formatting personalized Groq AI alignment insights' },
     { title: 'Returning to Sanctuary Dashboard', desc: 'Session saved safely' },
   ];
 
   const steps = mode === 'launch' ? launchSteps : exitSteps;
 
   useEffect(() => {
-    const totalDuration = mode === 'launch' ? 2400 : 1800; // ms
+    const totalDuration = mode === 'launch' ? 1800 : 1500; // ms
     const intervalTime = 30;
     const increment = 100 / (totalDuration / intervalTime);
 
@@ -54,8 +58,10 @@ export const SessionLoadingTransition: React.FC<SessionLoadingTransitionProps> =
         if (next >= 100) {
           clearInterval(timer);
           setTimeout(() => {
-            onComplete();
-          }, 250);
+            if (onCompleteRef.current) {
+              onCompleteRef.current();
+            }
+          }, 150);
           return 100;
         }
 
@@ -70,7 +76,7 @@ export const SessionLoadingTransition: React.FC<SessionLoadingTransitionProps> =
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, [mode, onComplete]);
+  }, [mode]);
 
   return (
     <motion.div

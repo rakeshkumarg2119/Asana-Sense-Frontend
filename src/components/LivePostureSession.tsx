@@ -46,12 +46,14 @@ import {
   Laptop,
   ArrowLeft,
   Volume2,
-  Trophy
+  Trophy,
+  Key
 } from 'lucide-react';
-import { ALL_EIGHT_POSES } from '../data/yogaPoses';
-import { YogaPose, PostureAnalysisResult, SessionPoseRecord, PracticeSession, UserProfile } from '../types';
+import { ALL_POSES } from '../data/yogaPoses';
+import type { YogaPose, PostureAnalysisResult, SessionPoseRecord, PracticeSession, UserProfile, PoseDetectionResult } from '../types';
 import { PoseVisualArtwork } from './PoseVisualArtwork';
 import { useVoiceController } from '../hooks/useVoiceController';
+import { usePoseLandmarker } from '../hooks/usePoseLandmarker';
 import { soundEngine } from '../utils/audioFeedback';
 import { AsanaSenseLogo } from './AsanaSenseLogo';
 
@@ -69,6 +71,18 @@ const POSE_COLOR_PALETTES: Record<string, { ring: string; text: string; bg: stri
     text: 'text-emerald-400',
     bg: 'bg-emerald-950/60',
     border: 'border-emerald-500/40',
+  },
+  'warrior': {
+    ring: 'from-cyan-400 to-blue-500',
+    text: 'text-cyan-400',
+    bg: 'bg-cyan-950/60',
+    border: 'border-cyan-500/40',
+  },
+  'warrior-3': {
+    ring: 'from-cyan-400 to-blue-500',
+    text: 'text-cyan-400',
+    bg: 'bg-cyan-950/60',
+    border: 'border-cyan-500/40',
   },
   'warrior-2': {
     ring: 'from-cyan-400 to-blue-500',
@@ -114,6 +128,29 @@ const POSE_COLOR_PALETTES: Record<string, { ring: string; text: string; bg: stri
   },
 };
 
+// Format user name for natural spoken audio (avoids spelling letters or acronym pronunciation)
+function formatSpokenName(rawName?: string | null): string {
+  if (!rawName || !rawName.trim()) return 'Yogi';
+  let clean = rawName.includes('@') ? rawName.split('@')[0] : rawName;
+  clean = clean.replace(/^[0-9_.-]+|[0-9_.-]+$/g, '');
+  clean = clean.replace(/[^a-zA-Z\s]/g, ' ').trim();
+  const firstWord = clean.split(/\s+/)[0];
+  if (!firstWord || firstWord.length < 2) return 'Yogi';
+  return firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
+}
+
+function isPoseMatch(predicted?: string | null, target?: string | null): boolean {
+  if (!predicted || !target) return false;
+  if (predicted === target) return true;
+  const map: Record<string, string> = {
+    shoulder_stand: 'shoudler_stand',
+    shoudler_stand: 'shoulder_stand',
+    triangle: 'traingle',
+    traingle: 'triangle',
+  };
+  return map[predicted] === target || map[target] === predicted;
+}
+
 export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   userProfile,
   onFinishSession,
@@ -131,12 +168,13 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
   const greetingInfo = getTimeGreeting();
   const userName = userProfile?.name || 'Yogi';
-  const fullGreeting = `${greetingInfo.text}, ${userName}! Are you ready to boost your day by doing yoga?`;
+  const spokenUserName = formatSpokenName(userProfile?.name);
+  const fullGreeting = `${greetingInfo.text}, ${spokenUserName}! Are you ready to boost your day by doing yoga?`;
 
   // Pose selection state: starts as null by default so user manually selects or speaks the pose!
   const [selectedPoseIndex, setSelectedPoseIndex] = useState<number | null>(() => {
     if (initialPoseId) {
-      const idx = ALL_EIGHT_POSES.findIndex((p) => p.id === initialPoseId);
+      const idx = ALL_POSES.findIndex((p) => p.id === initialPoseId);
       return idx >= 0 ? idx : null;
     }
     return null;
@@ -145,7 +183,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   // Active posture monitoring state: only starts when user is explicitly ready!
   const [isPoseActive, setIsPoseActive] = useState<boolean>(false);
 
-  const currentPose = selectedPoseIndex !== null ? ALL_EIGHT_POSES[selectedPoseIndex] : null;
+  const currentPose = selectedPoseIndex !== null ? ALL_POSES[selectedPoseIndex] : null;
   const poseTheme = currentPose ? (POSE_COLOR_PALETTES[currentPose.id] || POSE_COLOR_PALETTES['tree-pose']) : POSE_COLOR_PALETTES['tree-pose'];
 
   // Yoga Pose Drawer state (Right Side, equally spaced with Camera on Left, adjustable size)
@@ -216,6 +254,17 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   const [poseRecords, setPoseRecords] = useState<Record<string, SessionPoseRecord>>({});
   const [autoEmailDispatched, setAutoEmailDispatched] = useState(false);
 
+  // Groq AI connection status (key is stored by the report modal / this popover)
+  const [groqKeySaved, setGroqKeySaved] = useState<boolean>(() => {
+    try {
+      return Boolean(localStorage.getItem('groq_api_key'));
+    } catch {
+      return false;
+    }
+  });
+  const [showGroqPopover, setShowGroqPopover] = useState(false);
+  const [groqKeyDraft, setGroqKeyDraft] = useState('');
+
   // AI Master Guide Identity (Veda AI default)
   const [aiCoachName, setAiCoachName] = useState<'Veda AI' | 'Tara AI' | 'Aura AI' | 'Prana AI' | 'Soma AI'>('Veda AI');
   const [showCoachMenu, setShowCoachMenu] = useState(false);
@@ -235,6 +284,71 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     encouragingFeedback: 'Welcome. Select a posture to begin your biomechanical session.',
   });
 
+  // Canvas for MediaPipe WASM skeleton rendering
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Real-time pose detection model state from WebSocket
+  const [modelPoseResult, setModelPoseResult] = useState<PoseDetectionResult | null>(null);
+
+  // Hook up MediaPipe WASM client + WebSocket pipeline to FastAPI backend
+  const { isConnected: isModelWsConnected } = usePoseLandmarker({
+    videoRef,
+    canvasRef,
+    targetPose: currentPose?.model_class_name || null,
+    isActive: isPoseActive && cameraActive,
+    voiceEnabled: voiceSpeechEnabled,
+    onPoseResult: (result) => {
+      setModelPoseResult(result);
+
+      const hasCriticalJoint = Boolean(
+        result.has_red ||
+        result.joints?.some(j => j.status === 'critical' || (j.status as string) === 'red' || j.deviation >= 3.5) ||
+        (result.predicted_pose !== 'no_pose' && currentPose?.model_class_name && !isPoseMatch(result.predicted_pose, currentPose.model_class_name))
+      );
+      const hasWarningJoint = Boolean(
+        result.has_yellow ||
+        result.joints?.some(j => (j.status === 'warning' || j.status === 'misaligned') && j.deviation < 3.5)
+      );
+
+      if (result.is_correct) {
+        setPostureAnalysis((prev) => ({
+          ...prev,
+          score: Math.round(Math.max(92, result.confidence * 100)),
+          alignmentStatus: 'All Joints Perfect (Aligned)',
+          encouragingFeedback: `Great form! Holding ${currentPose?.name || 'pose'} accurately.`,
+          keyCues: [`Holding ${currentPose?.name || 'pose'} with excellent form. Keep steady!`],
+        }));
+      } else if (result.predicted_pose === 'no_pose') {
+        setPostureAnalysis((prev) => ({
+          ...prev,
+          alignmentStatus: 'Step into Frame / Normal Posture',
+          encouragingFeedback: 'Take your yoga position. Timer will start when posture is detected.',
+          keyCues: ['Step into frame and assume posture.'],
+        }));
+      } else if (hasCriticalJoint) {
+        // Red: Mistake detected
+        const msg = result.correction_message || 'Joint alignment mistake detected.';
+        setPostureAnalysis((prev) => ({
+          ...prev,
+          score: Math.round(Math.max(45, result.confidence * 65)),
+          alignmentStatus: 'Mistake Detected (Red)',
+          encouragingFeedback: msg,
+          keyCues: [msg],
+        }));
+      } else if (hasWarningJoint || result.correction_message) {
+        // Yellow: Warning / Minor adjustment - timer does not stop!
+        const msg = result.correction_message || 'Minor adjustment needed; maintain your balance.';
+        setPostureAnalysis((prev) => ({
+          ...prev,
+          score: Math.round(Math.max(78, result.confidence * 90)),
+          alignmentStatus: 'Minor Adjustment (Holding - Yellow)',
+          encouragingFeedback: msg,
+          keyCues: [msg],
+        }));
+      }
+    },
+  });
+
   // Uploaded / Simulated test pose image state
   const [uploadedPoseImage, setUploadedPoseImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -244,7 +358,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   // Voice controller handlers
   const voiceController = useVoiceController({
     onSelectPose: (poseId) => {
-      const idx = ALL_EIGHT_POSES.findIndex((p) => p.id === poseId);
+      const idx = ALL_POSES.findIndex((p) => p.id === poseId);
       if (idx >= 0) {
         handleSelectPose(idx);
       }
@@ -315,8 +429,8 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       }
     },
     onNextPose: () => {
-      const nextIdx = selectedPoseIndex !== null && selectedPoseIndex < ALL_EIGHT_POSES.length - 1 ? selectedPoseIndex + 1 : 0;
-      const nextPoseName = ALL_EIGHT_POSES[nextIdx]?.name || 'Next Pose';
+      const nextIdx = selectedPoseIndex !== null && selectedPoseIndex < ALL_POSES.length - 1 ? selectedPoseIndex + 1 : 0;
+      const nextPoseName = ALL_POSES[nextIdx]?.name || 'Next Pose';
       voiceController.setLastCommandRecognized(`Next Pose: ${nextPoseName}`);
       handleNextPose();
     },
@@ -503,29 +617,69 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     return () => clearInterval(sessionInterval);
   }, []);
 
-  // Pose Hold Timer & Personal Best Streak Detector
+  // Model-driven Pose Hold Timer:
+  // Timer runs when user is in the pose and NO RED joint/mistake is detected.
+  // Even if there is a yellow warning, the timer does NOT stop! It keeps running until a red is detected.
   useEffect(() => {
     if (!isPoseActive || selectedPoseIndex === null) return;
 
-    const pose = ALL_EIGHT_POSES[selectedPoseIndex];
+    const pose = ALL_POSES[selectedPoseIndex];
     if (!pose) return;
 
+    // Check if red is detected (severe mistake or wrong pose)
+    const hasRedJoint = Boolean(
+      modelPoseResult?.has_red ||
+      modelPoseResult?.joints?.some(
+        (j) => j.status === 'critical' || (j.status as string) === 'red' || j.deviation >= 3.5
+      ) ||
+      (modelPoseResult && modelPoseResult.predicted_pose !== 'no_pose' && pose.model_class_name &&
+        !isPoseMatch(modelPoseResult.predicted_pose, pose.model_class_name))
+    );
+
+    // If red is detected, or no pose detected at all while holding
+    const isRedOrIdle = !modelPoseResult || modelPoseResult.predicted_pose === 'no_pose' || hasRedJoint;
+
+    if (isRedOrIdle) {
+      // If user had an active streak and made a RED mistake, update best time and reset
+      if (poseHoldSeconds > 0) {
+        setBestHoldPerPose((prev) => {
+          const prevBest = prev[pose.id] || 0;
+          if (poseHoldSeconds > prevBest) {
+            setPersonalBestToast({
+              poseName: pose.name,
+              seconds: poseHoldSeconds,
+              prior: prevBest,
+            });
+            if (voiceSpeechEnabled) {
+              soundEngine.speak(`Streak stopped at ${poseHoldSeconds} seconds. New personal best set!`);
+            }
+            return { ...prev, [pose.id]: poseHoldSeconds };
+          } else {
+            if (voiceSpeechEnabled) {
+              soundEngine.speak(`Mistake made. You held for ${poseHoldSeconds} seconds. Your best is ${prevBest} seconds.`);
+            }
+            return prev;
+          }
+        });
+        setPoseHoldSeconds(0);
+      }
+      return;
+    }
+
+    // When NOT red (i.e. all correct green OR minor warning yellow), tick hold seconds every 1000ms!
     const interval = setInterval(() => {
       setPoseHoldSeconds((prevStreak) => {
         const nextStreak = prevStreak + 1;
 
-        // Personal best evaluation
         setBestHoldPerPose((prevBestMap) => {
           const currentBest = prevBestMap[pose.id] || 0;
           if (nextStreak > currentBest) {
             if (currentBest > 0 && nextStreak === currentBest + 1) {
-              // Trigger personal best celebration toast
               setPersonalBestToast({
                 poseName: pose.name,
                 seconds: nextStreak,
                 prior: currentBest,
               });
-
               if (voiceSpeechEnabled) {
                 soundEngine.playChime(880, 0.4);
               }
@@ -540,11 +694,11 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isPoseActive, selectedPoseIndex, voiceSpeechEnabled]);
+  }, [isPoseActive, selectedPoseIndex, modelPoseResult, voiceSpeechEnabled, poseHoldSeconds]);
 
   // Handle Pose Selection (manual click or voice selection) - sets pose but waits for user to be ready!
   const handleSelectPose = (idx: number, isNextPose = false) => {
-    const newPose = ALL_EIGHT_POSES[idx];
+    const newPose = ALL_POSES[idx];
     if (!newPose) return;
 
     const isSamePose = selectedPoseIndex === idx;
@@ -603,7 +757,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       return;
     }
 
-    const pose = ALL_EIGHT_POSES[selectedPoseIndex];
+    const pose = ALL_POSES[selectedPoseIndex];
     if (!pose) return;
 
     if (!cameraActive) {
@@ -627,7 +781,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   // Trigger Gemini Posture Analysis
   const handleTriggerPostureAnalysis = async () => {
     if (isAnalyzing || selectedPoseIndex === null) return;
-    const pose = ALL_EIGHT_POSES[selectedPoseIndex];
+    const pose = ALL_POSES[selectedPoseIndex];
     if (!pose) return;
 
     setIsAnalyzing(true);
@@ -697,7 +851,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       return;
     }
 
-    if (selectedPoseIndex < ALL_EIGHT_POSES.length - 1) {
+    if (selectedPoseIndex < ALL_POSES.length - 1) {
       handleSelectPose(selectedPoseIndex + 1, true);
     } else {
       handleCompleteSession();
@@ -713,6 +867,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
   const handleCompleteSession = () => {
     soundEngine.playChime(528, 2.5);
+    stopCamera();
 
     let finalRecordsMap = { ...poseRecords };
     if (currentPose) {
@@ -723,13 +878,21 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       );
       finalRecordsMap[currentPose.id] = {
         poseId: currentPose.id,
+        pose_id: currentPose.id,
         poseName: currentPose.name,
-        sanskritName: currentPose.sanskritName,
+        pose_name: currentPose.name,
+        sanskritName: currentPose.sanskritName || '',
+        sanskrit_name: currentPose.sanskritName || '',
         durationSeconds: (existing?.durationSeconds || 0) + poseHoldSeconds,
+        duration_seconds: (existing?.durationSeconds || 0) + poseHoldSeconds,
         bestHoldSeconds: bestHold,
+        best_hold_seconds: bestHold,
         attemptsCount: (existing?.attemptsCount || 0) + (attemptsPerPose[currentPose.id] || 1),
+        attempts_count: (existing?.attemptsCount || 0) + (attemptsPerPose[currentPose.id] || 1),
         accuracyScore: postureAnalysis.score || 92,
+        accuracy_score: postureAnalysis.score || 92,
         cuesReceived: postureAnalysis.keyCues || [],
+        cues_received: postureAnalysis.keyCues || [],
         status: 'completed',
       };
     }
@@ -737,33 +900,30 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     const finalRecords: SessionPoseRecord[] = Object.values(finalRecordsMap);
 
     const avgScore = finalRecords.length > 0
-      ? Math.round(finalRecords.reduce((acc, r) => acc + (r.accuracyScore || 0), 0) / finalRecords.length)
-      : 94;
+      ? Math.round(finalRecords.reduce((acc, r) => acc + (r.accuracyScore || (r as any).accuracy_score || 0), 0) / finalRecords.length)
+      : 0;
 
     const totalSeconds = totalSessionSeconds > 0 
       ? totalSessionSeconds 
-      : finalRecords.reduce((acc, r) => acc + (r.durationSeconds || 0), 0) || 60;
+      : finalRecords.reduce((acc, r) => acc + (r.durationSeconds || (r as any).duration_seconds || 0), 0) || poseHoldSeconds;
+
+    // Only real recorded poses are reported (no fabricated fallback pose)
+    const sessionPoses: SessionPoseRecord[] = finalRecords;
 
     const sessionData: PracticeSession = {
       id: 'session_' + Date.now(),
       startTime: sessionStartTime,
+      start_time: sessionStartTime,
       endTime: Date.now(),
+      end_time: Date.now(),
       totalDurationSeconds: totalSeconds,
-      posesRecorded: finalRecords.length > 0 ? finalRecords : [
-        {
-          poseId: 'tree-pose',
-          poseName: 'Tree Pose',
-          sanskritName: 'Vrikshasana',
-          durationSeconds: totalSeconds,
-          bestHoldSeconds: bestHoldPerPose['tree-pose'] || 12,
-          attemptsCount: attemptsPerPose['tree-pose'] || 2,
-          accuracyScore: 94,
-          cuesReceived: ['Steadiness in drishti focus and pelvis leveling maintained.'],
-          status: 'completed'
-        }
-      ],
+      total_duration_seconds: totalSeconds,
+      posesRecorded: sessionPoses,
+      poses_recorded: sessionPoses,
       overallAccuracy: avgScore,
-      caloriesBurnedEst: Math.max(14, Math.round((totalSeconds / 60) * 4.8)),
+      overall_accuracy: avgScore,
+      caloriesBurnedEst: Math.max(0, Math.round((totalSeconds / 60) * 4.8)),
+      calories_burned_est: Math.max(0, Math.round((totalSeconds / 60) * 4.8)),
     };
 
     // Trigger Automated Background Email Dispatch (No button click required!)
@@ -787,75 +947,18 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     onFinishSession(sessionData);
   };
 
-  // Instant Sample Report Generator
-  const handleViewSampleReport = () => {
-    const sampleReportData: PracticeSession = {
-      id: 'sample_verified_report_' + Date.now(),
-      startTime: Date.now() - (18 * 60 * 1000),
-      endTime: Date.now(),
-      totalDurationSeconds: 1080,
-      overallAccuracy: 94,
-      caloriesBurnedEst: 86,
-      posesRecorded: [
-        {
-          poseId: 'warrior-2',
-          poseName: 'Warrior II Pose',
-          sanskritName: 'Virabhadrasana II',
-          durationSeconds: 120,
-          accuracyScore: 95,
-          cuesReceived: [
-            'Front knee aligned exactly over second toe at 90° angle',
-            'Torso remains perpendicular to the ground without forward leaning',
-            'Arms parallel to the floor with relaxed trapezius muscles'
-          ],
-          status: 'completed'
-        },
-        {
-          poseId: 'tree-pose',
-          poseName: 'Tree Pose',
-          sanskritName: 'Vrikshasana',
-          durationSeconds: 90,
-          accuracyScore: 92,
-          cuesReceived: [
-            'Right foot grounded securely on inner left thigh (avoiding knee joint)',
-            'Pelvis leveled symmetrically across horizontal plane',
-            'Drishti gaze fixed steadily on non-moving horizon'
-          ],
-          status: 'completed'
-        },
-        {
-          poseId: 'downward-dog',
-          poseName: 'Downward-Facing Dog',
-          sanskritName: 'Adho Mukha Svanasana',
-          durationSeconds: 150,
-          accuracyScore: 96,
-          cuesReceived: [
-            'Knuckles firmly pressed into mat to decompress median wrist nerve',
-            'Sit bones lifted high toward ceiling with micro-bent knees for hamstring safety',
-            'Shoulder blades rotated outward creating space for cervical spine'
-          ],
-          status: 'completed'
-        },
-      ],
-      aiReport: {
-        overallScore: 94,
-        flexibilityIndex: 'Advanced Alignment (Tier 3)',
-        coreStabilityScore: 91,
-        keyStrengths: [
-          'Exceptional 90° knee tracking and hip abduction in Warrior II hold',
-          'Strong bilateral pelvis leveling and drishti steadiness in Tree Pose balance',
-          'Optimal weight distribution through metacarpal knuckles in Downward Dog',
-        ],
-        priorityGrowthAreas: [
-          'Maintain micro-bend in front supporting knee during Extended Triangle to protect posterior capsule',
-          'Soften upper trapezius tension when reaching arms overhead in Crescent Lunge'
-        ],
-        masterTeacherNote: 'Outstanding alignment precision and neuromuscular control throughout the session. Biomechanical angles and joint stability met gold-standard criteria across all recorded asanas.',
-        recommendedNextPoses: ['Warrior III (Virabhadrasana III)', 'Half Moon Pose (Ardha Chandrasana)', 'Revolved Triangle (Parivrtta Trikonasana)'],
-      }
-    };
-    onFinishSession(sampleReportData);
-  };
+  // Names of the poses actually practiced so far (finished holds + the pose currently being held)
+  const practicedPoseNames: string[] = (() => {
+    const names: string[] = [];
+    Object.values(poseRecords).forEach((r: any) => {
+      const n = r?.poseName || r?.pose_name;
+      if (n && !names.includes(n)) names.push(n);
+    });
+    if (currentPose && (isPoseActive || poseHoldSeconds > 0) && !names.includes(currentPose.name)) {
+      names.push(currentPose.name);
+    }
+    return names;
+  })();
 
   const formatTime = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -1041,16 +1144,82 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
             </div>
           )}
 
-          {/* Sample Report Direct Inspection Button */}
-          <button
-            id="view-sample-report-btn"
-            onClick={handleViewSampleReport}
-            className="px-2.5 py-1.5 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 text-indigo-300 hover:text-indigo-100 border border-indigo-500/40 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-            title="Preview Verified Biomechanics Report"
-          >
-            <FileText className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="hidden sm:inline">Sample Report</span>
-          </button>
+          {/* Groq AI status indicator */}
+          <div className="relative">
+            <button
+              id="groq-status-pill"
+              type="button"
+              onClick={() => {
+                setGroqKeyDraft('');
+                setShowGroqPopover((v) => !v);
+              }}
+              className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
+                groqKeySaved
+                  ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/60 hover:border-emerald-400'
+                  : 'bg-stone-800/90 text-stone-300 border-stone-700 hover:bg-stone-700/90'
+              }`}
+              title={groqKeySaved ? 'Groq AI key saved - your report will use Llama 3.3 70B' : 'No personal Groq key saved - the report uses the server key or built-in engine. Click to add one.'}
+            >
+              <span className={`inline-flex h-2 w-2 rounded-full ${groqKeySaved ? 'bg-emerald-400' : 'bg-stone-500'}`} />
+              <Key className={`w-3.5 h-3.5 ${groqKeySaved ? 'text-emerald-400' : 'text-stone-400'}`} />
+              <span className="hidden sm:inline">{groqKeySaved ? 'Groq AI Connected' : 'Groq AI Auto'}</span>
+            </button>
+
+            {showGroqPopover && (
+              <div className="absolute top-full right-0 mt-1.5 z-40 w-64 p-3 rounded-2xl bg-stone-900/95 border border-stone-700 shadow-2xl backdrop-blur-md space-y-2">
+                <div className="text-[11px] text-stone-300 leading-relaxed">
+                  {groqKeySaved
+                    ? 'Your Groq key is saved. Your end-of-session report will use llama-3.3-70b-versatile.'
+                    : 'Paste a Groq API key (gsk_...) to power your end-of-session AI report.'}
+                </div>
+                <input
+                  type="password"
+                  value={groqKeyDraft}
+                  onChange={(e) => setGroqKeyDraft(e.target.value)}
+                  placeholder="gsk_..."
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-stone-800 border border-stone-600 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={!groqKeyDraft.trim()}
+                    onClick={() => {
+                      try {
+                        localStorage.setItem('groq_api_key', groqKeyDraft.trim());
+                        setGroqKeySaved(true);
+                      } catch {
+                        /* storage unavailable */
+                      }
+                      setGroqKeyDraft('');
+                      setShowGroqPopover(false);
+                    }}
+                    className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold cursor-pointer"
+                  >
+                    Save Key
+                  </button>
+                  {groqKeySaved && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          localStorage.removeItem('groq_api_key');
+                        } catch {
+                          /* ignore */
+                        }
+                        setGroqKeySaved(false);
+                        setShowGroqPopover(false);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-rose-300 text-xs font-semibold cursor-pointer"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Dedicated Voice-Command Toggle Switch (Auto Opens Movable Commands Table) */}
           <div className="relative">
@@ -1072,7 +1241,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               }`}
               title={
                 voiceController.errorMessage ||
-                "Voice Commands: Say 'open poses', 'preview', 'Warrior 2', 'ready', 'pause', 'resume'"
+                "Voice Commands: Say 'open poses', 'preview', 'Warrior 3', 'ready', 'pause', 'resume'"
               }
             >
               {/* Pulsing Visual Status Indicator */}
@@ -1130,10 +1299,20 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
           <button
             id="finish-session-btn"
             onClick={handleCompleteSession}
-            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer"
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 active:scale-95 text-white font-bold text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-900/60 ring-1 ring-emerald-300/40 cursor-pointer"
+            title={
+              practicedPoseNames.length > 0
+                ? `Generate your AI report for: ${practicedPoseNames.join(', ')}`
+                : 'Finish the session and view your AI report'
+            }
           >
-            <Award className="w-3.5 h-3.5" />
-            <span>Finish</span>
+            <Award className="w-4 h-4" />
+            <span>Finish &amp; View AI Report</span>
+            {practicedPoseNames.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] font-mono leading-none">
+                {practicedPoseNames.length} {practicedPoseNames.length === 1 ? 'pose' : 'poses'}
+              </span>
+            )}
           </button>
 
           {/* Exit Button */}
@@ -1171,13 +1350,19 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
             {/* Live Camera Video Feed or Greeting State */}
             {cameraActive ? (
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className={`w-full h-full ${videoFitMode === 'contain' ? 'object-contain bg-black' : 'object-cover bg-black'} transform -scale-x-100 relative z-10 transition-all duration-300`}
-              />
+              <div className="relative w-full h-full flex items-center justify-center">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full ${videoFitMode === 'contain' ? 'object-contain bg-black' : 'object-cover bg-black'} transform -scale-x-100 relative z-10 transition-all duration-300`}
+                />
+                <canvas
+                  ref={canvasRef}
+                  className={`absolute inset-0 w-full h-full ${videoFitMode === 'contain' ? 'object-contain' : 'object-cover'} transform -scale-x-100 pointer-events-none z-15`}
+                />
+              </div>
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-gradient-to-b from-stone-950 via-[#0a121e] to-stone-950 relative z-10 text-center">
                 {currentPose ? (
@@ -1208,7 +1393,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                   <p className="text-xs text-stone-400 leading-relaxed">
                     {currentPose 
                       ? `You selected ${currentPose.name}. Click 'I'm Ready' below or speak voice commands to enable camera and start the posture timer.`
-                      : 'Choose any of the 8 asanas from the drawer on the right (or say "Warrior 2" / "Tree Pose") to get started!'}
+                      : 'Choose any of the 8 asanas from the drawer on the right (or say "Warrior 3" / "Tree Pose") to get started!'}
                   </p>
 
                   {/* Camera Notice / Fallback helper if error */}
@@ -1282,7 +1467,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                     <div className="rounded-lg bg-stone-950/90 p-2 border border-stone-800">
                       <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider block mb-0.5">🧘 8 Asana Names</span>
                       <div className="grid grid-cols-2 gap-0.5 text-[10px] font-mono text-stone-300">
-                        <span>• "Warrior 2"</span>
+                        <span>• "Warrior 3"</span>
                         <span>• "Tree Pose"</span>
                         <span>• "Triangle Pose"</span>
                         <span>• "Downward Dog"</span>
@@ -1305,11 +1490,41 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               {/* Top HUD Ribbon */}
               <div className="flex items-start justify-between gap-2 flex-wrap">
                 {/* Accuracy Score Pill */}
-                <div className="px-3 py-1.5 rounded-2xl bg-stone-950/85 backdrop-blur-md border border-emerald-500/50 text-xs font-mono text-emerald-300 flex items-center gap-2 shadow-lg">
-                  <span className={`w-2 h-2 rounded-full ${isPoseActive ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
-                  <span>Alignment:</span>
-                  <strong className="text-white text-sm font-black">{isPoseActive ? `${postureAnalysis.score}%` : 'Standby'}</strong>
-                </div>
+                {(() => {
+                  const hasRedJoint = Boolean(
+                    modelPoseResult?.has_red ||
+                    modelPoseResult?.joints?.some(
+                      (j) => j.status === 'critical' || (j.status as string) === 'red' || j.deviation >= 3.5
+                    ) ||
+                    (modelPoseResult && currentPose?.model_class_name && modelPoseResult.predicted_pose !== 'no_pose' &&
+                      !isPoseMatch(modelPoseResult.predicted_pose, currentPose.model_class_name))
+                  );
+                  return (
+                    <div className="px-3 py-1.5 rounded-2xl bg-stone-950/85 backdrop-blur-md border border-emerald-500/50 text-xs font-mono text-emerald-300 flex items-center gap-2 shadow-lg">
+                      <span className={`w-2 h-2 rounded-full ${
+                        !isPoseActive
+                          ? 'bg-amber-400'
+                          : modelPoseResult?.is_correct
+                          ? 'bg-emerald-400 animate-ping'
+                          : hasRedJoint
+                          ? 'bg-rose-500'
+                          : 'bg-yellow-400'
+                      }`} />
+                      <span>Alignment:</span>
+                      <strong className="text-white text-sm font-black">
+                        {!isPoseActive
+                          ? 'Standby'
+                          : modelPoseResult?.is_correct
+                          ? '✓ Perfect (100%)'
+                          : modelPoseResult?.predicted_pose === 'no_pose'
+                          ? 'No Yoga Pose'
+                          : hasRedJoint
+                          ? `${postureAnalysis.score}% (Mistake 🔴)`
+                          : `${postureAnalysis.score}% (Holding - Adjust 🟡)`}
+                      </strong>
+                    </div>
+                  );
+                })()}
 
                 {/* Framing Fit Mode Badge Toggle Tag */}
                 <button
@@ -1343,7 +1558,13 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                           cx="40"
                           cy="40"
                           r={circleRadius}
-                          className="stroke-emerald-400 transition-all duration-500 ease-out"
+                          className={`transition-all duration-500 ease-out ${
+                            modelPoseResult?.is_correct
+                              ? 'stroke-emerald-400'
+                              : (modelPoseResult?.has_red || modelPoseResult?.joints?.some(j => j.status === 'critical' || j.deviation >= 3.5))
+                              ? 'stroke-rose-500'
+                              : 'stroke-yellow-400'
+                          }`}
                           strokeWidth="5"
                           strokeDasharray={circleCircumference}
                           strokeDashoffset={strokeDashoffset}
@@ -1374,13 +1595,17 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                       <span className="text-[11px] font-bold text-white block mt-0.5">
                         {!isPoseActive 
                           ? 'Waiting to Start' 
-                          : poseHoldSeconds >= currentPose.idealHoldDurationSeconds 
-                            ? 'Target Met! ✨' 
-                            : 'Holding Pose 🧘'}
+                          : modelPoseResult?.is_correct
+                            ? 'All Joints Correct 🟢'
+                            : modelPoseResult?.predicted_pose === 'no_pose'
+                            ? 'Normal Pose (Paused) ⏸️'
+                            : (modelPoseResult?.has_red || modelPoseResult?.joints?.some(j => j.status === 'critical' || j.deviation >= 3.5))
+                            ? 'Mistake Detected 🔴'
+                            : 'Holding Pose (Adjusting 🟡)'}
                       </span>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="text-[9px] text-amber-300 font-bold bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-500/40">
-                          Best: {bestHoldPerPose[currentPose.id] || poseHoldSeconds}s
+                          Beat Best: {bestHoldPerPose[currentPose.id] || 0}s
                         </span>
                         <span className="text-[9px] text-stone-400 font-medium">
                           Target: {currentPose.idealHoldDurationSeconds}s
@@ -1546,7 +1771,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               </button>
 
               <span className="text-xs text-stone-400 font-mono px-1">
-                {selectedPoseIndex !== null ? `${selectedPoseIndex + 1}/${ALL_EIGHT_POSES.length}` : '0/8'}
+                {selectedPoseIndex !== null ? `${selectedPoseIndex + 1}/${ALL_POSES.length}` : '0/8'}
               </span>
 
               <button
@@ -1556,9 +1781,9 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                 <span>
                   {selectedPoseIndex === null
                     ? 'Start Pose'
-                    : selectedPoseIndex === ALL_EIGHT_POSES.length - 1
+                    : selectedPoseIndex === ALL_POSES.length - 1
                     ? 'Finish Practice'
-                    : `Next: ${ALL_EIGHT_POSES[selectedPoseIndex + 1]?.name}`}
+                    : `Next: ${ALL_POSES[selectedPoseIndex + 1]?.name}`}
                 </span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -1649,7 +1874,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2.5">
-                        {ALL_EIGHT_POSES.map((pose, idx) => {
+                        {ALL_POSES.map((pose, idx) => {
                           const isSelected = idx === selectedPoseIndex;
                           const isDone = (poseRecords[pose.id]?.durationSeconds || 0) > 0;
 
@@ -1922,7 +2147,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                   <div className="rounded-2xl bg-stone-950/90 p-3 border border-stone-800">
                     <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block mb-1.5">🧘 8 Asana Direct Commands</span>
                     <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono text-stone-300">
-                      <div className="bg-stone-900/80 px-2 py-1 rounded border border-stone-800">• "Warrior 2"</div>
+                      <div className="bg-stone-900/80 px-2 py-1 rounded border border-stone-800">• "Warrior 3"</div>
                       <div className="bg-stone-900/80 px-2 py-1 rounded border border-stone-800">• "Tree Pose"</div>
                       <div className="bg-stone-900/80 px-2 py-1 rounded border border-stone-800">• "Triangle Pose"</div>
                       <div className="bg-stone-900/80 px-2 py-1 rounded border border-stone-800">• "Downward Dog"</div>

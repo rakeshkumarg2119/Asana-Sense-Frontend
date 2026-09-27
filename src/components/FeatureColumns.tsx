@@ -115,7 +115,7 @@ export const FeatureColumns: React.FC<FeatureColumnsProps> = ({
               Benefits & Wrong Posture Impacts
             </h3>
             <p className="text-stone-600 text-sm mt-2 leading-relaxed">
-              Every pose provides anatomical benefits paired with explicit warnings on wrong posture impact—such as knee shear in Warrior II, lumbar strain in Cobra, or neck compression during inversions.
+              Every pose provides anatomical benefits paired with explicit warnings on wrong posture impact—such as pelvic twist in Warrior III, lumbar strain in Cobra, or neck compression during inversions.
             </p>
           </div>
           <div className="pt-4 mt-4 border-t border-stone-100 flex items-center justify-between">

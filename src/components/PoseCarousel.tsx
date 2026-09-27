@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, ChevronRight, Sparkles, Activity, ShieldAlert, ArrowUpRight, Flame, Lock } from 'lucide-react';
-import { ALL_EIGHT_POSES } from '../data/yogaPoses';
+import { ALL_POSES } from '../data/yogaPoses';
 import { YogaPose, UserProfile } from '../types';
 import { PoseVisualArtwork } from './PoseVisualArtwork';
 
@@ -21,7 +21,7 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [viewMode, setViewMode] = useState<'skeleton' | 'image'>('skeleton');
-  const totalPoses = ALL_EIGHT_POSES.length;
+  const totalPoses = ALL_POSES.length;
 
   useEffect(() => {
     if (isPaused) return;
@@ -39,7 +39,7 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
     setActiveIndex((prev) => (prev + 1) % totalPoses);
   };
 
-  const activePose = ALL_EIGHT_POSES[activeIndex];
+  const activePose = ALL_POSES[activeIndex];
 
   return (
     <section id="pose-carousel-showcase" className="relative py-16 px-6 sm:px-10 lg:px-14 max-w-[1720px] w-full mx-auto overflow-hidden">
@@ -258,7 +258,7 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
 
       {/* Mini 8-Pose Thumbnail Ribbon */}
       <div className="mt-6 grid grid-cols-4 sm:grid-cols-8 gap-2 sm:gap-3">
-        {ALL_EIGHT_POSES.map((pose, idx) => {
+        {ALL_POSES.map((pose, idx) => {
           const isCurrent = idx === activeIndex;
           return (
             <button

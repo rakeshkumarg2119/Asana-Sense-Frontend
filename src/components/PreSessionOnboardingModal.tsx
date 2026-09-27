@@ -105,17 +105,26 @@ export const PreSessionOnboardingModal: React.FC<PreSessionOnboardingModalProps>
     const updatedProfile: UserProfile = {
       ...userProfile,
       hasCompletedOnboarding: true,
+      has_completed_onboarding: true,
       ageCategory,
+      age_category: ageCategory,
       experienceLevel,
+      experience_level: experienceLevel,
       bmiData: {
         weightKg,
+        weight_kg: weightKg,
         heightCm,
+        height_cm: heightCm,
         age: ageCategory === '18-25' ? 22 : ageCategory === '26-40' ? 32 : ageCategory === '41-60' ? 50 : 65,
         gender: 'Not specified',
         bmiValue,
+        bmi_value: bmiValue,
         bmiCategory,
+        bmi_category: bmiCategory,
         dietaryPreference,
+        dietary_preference: dietaryPreference,
         calculatedAt: new Date().toLocaleDateString(),
+        calculated_at: new Date().toLocaleDateString(),
       },
     };
 

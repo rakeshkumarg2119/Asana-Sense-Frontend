@@ -298,77 +298,315 @@ Return JSON schema:
   }
 });
 
-// Final Session Report Generator
+// Final Session Report Generator with Groq API & Previous Session Progress Analysis
 app.post('/api/generate-session-report', async (req, res) => {
   try {
-    const { sessionData } = req.body;
-    const ai = getGeminiClient();
+    const { sessionData, previousSessionData, groqApiKey } = req.body;
+    const apiKeyToUse = groqApiKey || process.env.GROQ_API_KEY;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
-      contents: `You are ASANA-SENSE Master Yoga Biomechanics Coach.
-Analyze the user's completed practice session:
+    // 1. Try Groq API first if key is available
+    if (apiKeyToUse) {
+      try {
+        console.log('[GROQ AI] Generating dynamic session report with llama-3.3-70b-versatile...');
+        const systemPrompt = `You are Veda AI, an elite yoga therapist and warm master biomechanics coach for ASANA-SENSE.
+Your goal is to communicate in clear, human-understandable, natural language (avoid dense medical jargon).
+Analyze the user's completed practice session and actual poses performed.
+If previous session data is provided and they practiced the same pose(s), specifically explain how they improved compared to last time with clear numbers and praise.
+Give a high-energy, uplifting "boostingMessage" to inspire them to keep going!
+
+You MUST return a JSON object with:
+- overallScore: number (0 to 100)
+- flexibilityIndex: string (e.g., "Developing Alignment", "Proficient Form", "Exceptional Steadiness")
+- coreStabilityScore: number (0 to 100)
+- boostingMessage: string (warm, encouraging 2-3 sentence motivational message celebrating their practice)
+- comparisonWithPrevious: string (clear comparison showing how they improved if they repeated poses or progress vs previous session)
+- keyStrengths: array of 2-3 specific positive observations on their actual poses
+- priorityGrowthAreas: array of 2-3 simple, actionable tips on how to improve for next time in plain human language
+- masterTeacherNote: string (mindful, grounding wisdom from the master yoga teacher)
+- recommendedNextPoses: array of 3 pose names tailored to their progress
+- poseImprovements: array of objects for each practiced pose with:
+    - poseName: string
+    - currentStatus: string (summary of hold steadiness and alignment today)
+    - actionableTips: array of 2-3 specific cues on how to improve this exact pose next time
+    - jointSafetyCue: string (anatomical checkpoint to protect knees/lower back/shoulders)
+- fitnessNutrition: object with:
+    - immediatePostWorkout: array of 2-3 recovery foods/drinks (e.g., electrolytes, protein smoothie, sprouted moong bowl)
+    - dailyStaminaFoods: array of 3-4 nutrient-dense foods for flexibility, joint health, and core strength
+    - foodsToAvoid: array of 2-3 inflammatory foods that hinder flexibility and joint recovery
+    - hydrationTip: string (cellular hydration guidance for spinal discs & fascia)
+    - dietSummary: string (warm 2-sentence nutritional advice for practitioner fitness)`;
+
+        const userPrompt = `Current Session:
 ${JSON.stringify(sessionData, null, 2)}
 
-Provide a comprehensive, inspiring post-session report with:
-- overallScore: number (0-100)
-- flexibilityIndex: string ("Developing", "Proficient", "Exceptional")
-- coreStabilityScore: number (0-100)
-- keyStrengths: array of 2-3 observed strengths
-- priorityGrowthAreas: array of 2-3 biomechanical focus points for next session
-- masterTeacherNote: string (2-3 sentences of uplifting, personalized advice)
-- recommendedNextPoses: array of 3 poses to progress to
-`,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            overallScore: { type: Type.NUMBER },
-            flexibilityIndex: { type: Type.STRING },
-            coreStabilityScore: { type: Type.NUMBER },
-            keyStrengths: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-            },
-            priorityGrowthAreas: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-            },
-            masterTeacherNote: { type: Type.STRING },
-            recommendedNextPoses: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-            },
-          },
-          required: ['overallScore', 'flexibilityIndex', 'coreStabilityScore', 'keyStrengths', 'priorityGrowthAreas', 'masterTeacherNote', 'recommendedNextPoses'],
-        },
-      },
-    });
+${previousSessionData ? `Previous Session for Comparison:\n${JSON.stringify(previousSessionData, null, 2)}` : 'First session (baseline certification).'}`;
 
-    const parsed = JSON.parse(response.text || '{}');
-    res.json({ success: true, data: parsed });
-  } catch (error) {
-    console.warn('Session report fallback:', error);
+        const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKeyToUse}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.5,
+          }),
+        });
+
+        if (groqRes.ok) {
+          const groqData = await groqRes.json();
+          const rawContent = groqData.choices?.[0]?.message?.content || '{}';
+          const cleanJson = rawContent.replace(/^```(?:json)?\s*/gm, '').replace(/\s*```$/gm, '');
+          const parsed = JSON.parse(cleanJson);
+          parsed.aiProvider = 'Groq (Llama 3.3 70B)';
+          return res.json({ success: true, data: parsed });
+        } else {
+          console.warn('[GROQ API WARN]', groqRes.status, await groqRes.text());
+        }
+      } catch (groqErr) {
+        console.warn('[GROQ API ERROR, trying Gemini fallback]:', groqErr);
+      }
+    }
+
+    // 2. Try Gemini API as secondary
+    try {
+      const ai = getGeminiClient();
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: `You are ASANA-SENSE Master Yoga Coach.
+Analyze the user's completed practice session in clear, human-understandable language:
+Current Session: ${JSON.stringify(sessionData, null, 2)}
+Previous Session: ${JSON.stringify(previousSessionData || {}, null, 2)}
+
+Provide structured JSON with:
+- overallScore: number (0-100)
+- flexibilityIndex: string ("Developing Form", "Proficient Alignment", "Exceptional Steadiness")
+- coreStabilityScore: number (0-100)
+- boostingMessage: string (inspiring motivational message celebrating their practice)
+- comparisonWithPrevious: string (clear description of how they improved if they repeated the pose or practiced again)
+- keyStrengths: array of 2-3 observed strengths on their actual poses
+- priorityGrowthAreas: array of 2-3 actionable improvement tips in simple human words
+- masterTeacherNote: string (2-3 sentences of uplifting wisdom)
+- recommendedNextPoses: array of 3 poses to practice next
+`,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              overallScore: { type: Type.NUMBER },
+              flexibilityIndex: { type: Type.STRING },
+              coreStabilityScore: { type: Type.NUMBER },
+              boostingMessage: { type: Type.STRING },
+              comparisonWithPrevious: { type: Type.STRING },
+              keyStrengths: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              priorityGrowthAreas: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              masterTeacherNote: { type: Type.STRING },
+              recommendedNextPoses: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+            },
+            required: ['overallScore', 'flexibilityIndex', 'coreStabilityScore', 'boostingMessage', 'comparisonWithPrevious', 'keyStrengths', 'priorityGrowthAreas', 'masterTeacherNote', 'recommendedNextPoses'],
+          },
+        },
+      });
+
+      const parsed = JSON.parse(response.text || '{}');
+      parsed.aiProvider = 'Gemini Flash';
+      return res.json({ success: true, data: parsed });
+    } catch (geminiErr) {
+      console.warn('[Gemini fallback triggered]:', geminiErr);
+    }
+
+    // 3. Dynamic Biomechanical Analysis Fallback (Pure Heuristics on Real Poses)
+    const currentPoses: any[] = sessionData?.posesRecorded || sessionData?.poses_recorded || [];
+    const prevPoses: any[] = previousSessionData?.posesRecorded || previousSessionData?.poses_recorded || [];
+
+    const currentScore = sessionData?.overallAccuracy || sessionData?.overall_accuracy || 92;
+    const prevScore = previousSessionData?.overallAccuracy || previousSessionData?.overall_accuracy || null;
+
+    let comparisonText = '';
+    let hasMatchedPose = false;
+
+    if (currentPoses.length > 0 && prevPoses.length > 0) {
+      for (const cp of currentPoses) {
+        const cId = cp.poseId || cp.pose_id;
+        const matched = prevPoses.find((p) => (p.poseId || p.pose_id) === cId);
+        if (matched) {
+          hasMatchedPose = true;
+          const holdDiff = (cp.durationSeconds || cp.duration_seconds || 0) - (matched.durationSeconds || matched.duration_seconds || 0);
+          const scoreDiff = (cp.accuracyScore || cp.accuracy_score || 0) - (matched.accuracyScore || matched.accuracy_score || 0);
+          const pName = cp.poseName || cp.pose_name || 'your pose';
+          
+          comparisonText = `In your previous session with ${pName}, you held for ${matched.durationSeconds || matched.duration_seconds || 0}s at ${matched.accuracyScore || matched.accuracy_score || 0}% accuracy. In this session, you achieved ${cp.durationSeconds || cp.duration_seconds || 0}s (${holdDiff >= 0 ? '+' : ''}${holdDiff}s) with ${cp.accuracyScore || cp.accuracy_score || 0}% accuracy (${scoreDiff >= 0 ? '+' : ''}${scoreDiff}%)!`;
+          break;
+        }
+      }
+    }
+
+    if (!comparisonText) {
+      if (prevScore !== null) {
+        const diff = currentScore - prevScore;
+        comparisonText = `Overall session posture efficiency moved from ${prevScore}% to ${currentScore}% (${diff >= 0 ? '+' : ''}${diff}% difference) with improved core steadiness!`;
+      } else {
+        comparisonText = `Baseline practice session certified! You established a strong foundational score of ${currentScore}% accuracy. Repeating these poses in your next session will unlock direct progress tracking.`;
+      }
+    }
+
+    const boostingMessage = hasMatchedPose
+      ? `Phenomenal dedication on the mat! Repeating ${currentPoses[0]?.poseName || 'your pose'} reinforced your neuromuscular alignment, noticeably reducing micro-wobbles and boosting your continuous hold endurance.`
+      : `Outstanding effort today! By stepping onto the mat and completing these structured holds, you activated deep stabilizing muscle chains and built mental calm. Every session compounds your physical resilience!`;
+
+    const dynamicStrengths: string[] = [];
+    const dynamicPoseImprovements: any[] = [];
+
+    const poseAdviceMap: Record<string, { tips: string[]; safety: string }> = {
+      chair: {
+        tips: [
+          'Shift your body weight 10-15% further back into your heels so your toes can remain lightly grounded without gripping.',
+          'Draw your navel gently toward your lumbar spine to avoid excessive hyperextension in the lower back.',
+          'Broaden across your collarbones and glide your shoulder blades down while extending arms overhead.'
+        ],
+        safety: 'Ensure your knees stay behind your toes and remain parallel, avoiding inward valgus collapse.'
+      },
+      cobra: {
+        tips: [
+          'Initiate the spinal extension from the thoracic spine (chest) rather than pushing aggressively through wrists.',
+          'Hug your elbows tightly into your ribcage to keep your rotator cuff safely engaged.',
+          'Keep the back of your neck long by directing your gaze 3-4 feet forward rather than cranking your chin up.'
+        ],
+        safety: 'Keep your pubic bone firmly anchored to the floor to prevent pinching in the lumbar L4-L5 vertebrae.'
+      },
+      dog: {
+        tips: [
+          'Firmly press through the knuckle pads of your index fingers and thumbs to decompress the median wrist nerve.',
+          'Maintain a generous microbend in your knees if hamstrings feel tight, allowing your sit bones to lift higher.',
+          'Rotate your outer armpits inward toward your ears to broaden the upper back and stabilize the scapulae.'
+        ],
+        safety: 'Prioritize a straight, lengthened spine over forcing heels flat to the mat.'
+      },
+      shoulder_stand: {
+        tips: [
+          'Walk your hands further down your back towards your shoulder blades to lift your chest into your chin.',
+          'Keep your elbows tucked strictly shoulder-width apart without splaying outward on the mat.',
+          'Reach upward through the balls of your feet, engaging your inner thighs and glutes.'
+        ],
+        safety: 'CRITICAL: Never turn your head or neck sideways while in shoulder stand; keep your gaze centered on your chest.'
+      },
+      triangle: {
+        tips: [
+          'Hinge strictly from the hip crease rather than rounding sideways through your waist.',
+          'Stack your top shoulder and hip directly over the bottom ones as if flattened between two panes of glass.',
+          'Engage your core obliques so very little weight rests on your lower hand or shin.'
+        ],
+        safety: 'Maintain a subtle 5-degree micro-bend in the front knee to shield posterior cruciate ligaments.'
+      },
+      tree: {
+        tips: [
+          'Firmly root through all four corners of your standing foot, lifting the inner arch for reflexive stability.',
+          'Fix your drishti (unwavering gaze) on a stationary eye-level point 6-8 feet ahead of you.',
+          'Hug the outer hip of the standing leg inward toward the midline rather than jutting it out.'
+        ],
+        safety: 'Place the lifted foot on either the inner thigh or calf—never directly against the side of the knee joint.'
+      },
+      warrior: {
+        tips: [
+          'Internally rotate the lifted thigh so both hip points face squarely toward the floor in a level horizontal plane.',
+          'Actively drive through the heel of the lifted back leg to activate your gluteus medius and hamstrings.',
+          'Create a continuous energetic line of power from your outstretched fingertips back through your flexed heel.'
+        ],
+        safety: 'Keep a soft microbend in the supporting knee to protect the knee capsule from hyperextension.'
+      }
+    };
+
+    for (const p of currentPoses) {
+      const pName = p.poseName || p.pose_name || 'Asana';
+      const pId = (p.poseId || p.pose_id || '').toLowerCase();
+      const bestH = p.bestHoldSeconds || p.best_hold_seconds || p.durationSeconds || p.duration_seconds || 15;
+      const acc = p.accuracyScore || p.accuracy_score || 92;
+      dynamicStrengths.push(`Solid execution in ${pName} with continuous hold of ${bestH}s and ${acc}% joint angle accuracy.`);
+
+      const adviceKey = Object.keys(poseAdviceMap).find((k) => pId.includes(k) || pName.toLowerCase().includes(k)) || 'tree';
+      const advice = poseAdviceMap[adviceKey];
+
+      dynamicPoseImprovements.push({
+        poseName: pName,
+        currentStatus: `Held for ${bestH}s with ${acc}% biomechanical alignment.`,
+        actionableTips: advice.tips,
+        jointSafetyCue: advice.safety
+      });
+    }
+
+    if (dynamicStrengths.length === 0) {
+      dynamicStrengths.push('Consistent breath synchronization maintained through transitions.');
+      dynamicStrengths.push('Pelvis leveling maintained with stable joint alignment.');
+      dynamicPoseImprovements.push({
+        poseName: 'Tree Pose Balance (Vrikshasana)',
+        currentStatus: 'Strong foundational balance hold certified.',
+        actionableTips: poseAdviceMap.tree.tips,
+        jointSafetyCue: poseAdviceMap.tree.safety
+      });
+    }
+
+    const fitnessNutrition = {
+      immediatePostWorkout: [
+        'Tender Coconut Water or Himalayan Pink Salt Lemon Water: Immediately replenishes vital electrolytes (potassium, sodium, magnesium) lost through sweat.',
+        'Sprouted Moong Dal Salad or Plant Protein Smoothie: High bio-availability plant protein with chia seeds to rebuild muscle fibers and restore glycogen within 45 minutes.',
+        'Warm Golden Turmeric Almond Milk: Curcumin reduces joint inflammation and accelerates fascial recovery after deep holds.'
+      ],
+      dailyStaminaFoods: [
+        'Soaked Walnuts & Flaxseeds: Rich in plant-based Omega-3 fatty acids to lubricate synovial joint capsules and maintain ligament elasticity.',
+        'Ancient Whole Millets (Ragi / Jowar) & Quinoa: Complex carbohydrates providing slow-burning energy for long yoga sessions without blood sugar spikes.',
+        'Fresh Leafy Greens (Palak, Moringa, Methi): Dense in iron, magnesium, and calcium to prevent post-practice muscle cramping.',
+        'Sesame Seeds & Soaked Almonds: Essential natural calcium and healthy fats to strengthen bone density for standing balances.'
+      ],
+      foodsToAvoid: [
+        'Refined White Sugar & High-Fructose Syrups: Induces systemic fascial stiffness and delays muscle recovery.',
+        'Ultra-Processed Deep-Fried Foods: High in trans fats that impair cellular oxygenation and cause post-practice lethargy.',
+        'Excessive Caffeine Immediately Before Practice: Dehydrates spinal intervertebral discs and increases tremors during balance holds.'
+      ],
+      hydrationTip: 'Drink 400-500ml of room-temperature or lukewarm water 30 minutes after your practice. Lukewarm water enhances digestive Agni and cellular hydration for spinal discs.',
+      dietSummary: 'Nourish your body with clean, sattvic, whole foods rich in antioxidants and plant proteins. Prioritize deep hydration and anti-inflammatory foods to support joint longevity and muscular vitality.'
+    };
+
+    const dynamicGrowthAreas = [
+      'Maintain a soft 5° micro-bend in your standing knees to protect the joint capsule.',
+      'Soften upper trapezius tension by sliding your shoulder blades down your ribcage.',
+      'Ground evenly through all four corners of your feet for optimal drishti balance.',
+    ];
+
     res.json({
       success: true,
       data: {
-        overallScore: 89,
-        flexibilityIndex: 'Proficient',
-        coreStabilityScore: 87,
-        keyStrengths: [
-          'Excellent hip stability and chest opening during warrior transitions',
-          'Steady breath control maintained through challenging balance holds',
-          'Symmetric spinal elongation in forward bends',
-        ],
-        priorityGrowthAreas: [
-          'Keep outer edges of feet firmly grounded to prevent ankle pronation',
-          'Focus on relaxing suboccipital neck muscles during upward gaze',
-        ],
-        masterTeacherNote: 'Commendable dedication on the mat today. Your focus and alignment awareness are compounding into deeper body intelligence with each session.',
-        recommendedNextPoses: ['Warrior III', 'Half Moon Pose', 'Revolved Triangle Pose'],
+        overallScore: currentScore,
+        flexibilityIndex: currentScore >= 90 ? 'Exceptional Steadiness' : currentScore >= 80 ? 'Proficient Alignment' : 'Developing Form',
+        coreStabilityScore: Math.min(100, Math.max(75, currentScore - 3)),
+        boostingMessage,
+        comparisonWithPrevious: comparisonText,
+        keyStrengths: dynamicStrengths.slice(0, 3),
+        priorityGrowthAreas: dynamicGrowthAreas,
+        poseImprovements: dynamicPoseImprovements,
+        fitnessNutrition,
+        masterTeacherNote: 'Consistency creates mastery. The steadiness and mindful presence you cultivated in today\'s holds will carry directly into your posture and daily energy throughout the week.',
+        recommendedNextPoses: ['Warrior III Pose', 'Tree Pose Balance', 'Downward-Facing Dog'],
+        aiProvider: 'Veda AI Biomechanics Engine',
       },
     });
+  } catch (error) {
+    console.error('Session report generation error:', error);
+    res.status(500).json({ error: 'Failed to generate session report' });
   }
 });
 

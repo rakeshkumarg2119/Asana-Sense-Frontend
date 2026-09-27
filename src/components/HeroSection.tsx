@@ -113,7 +113,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                 onClick={onExplorePoses}
                 className="px-6 py-3.5 rounded-2xl bg-white hover:bg-stone-50 active:scale-95 text-stone-800 font-semibold text-sm transition border border-stone-300 shadow-2xs cursor-pointer"
               >
-                Explore 8 Yoga Postures
+                Explore 7 Yoga Postures
               </button>
             </div>
           </div>
