@@ -252,7 +252,6 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   const [totalSessionSeconds, setTotalSessionSeconds] = useState(0);
   const [sessionStartTime] = useState(Date.now());
   const [poseRecords, setPoseRecords] = useState<Record<string, SessionPoseRecord>>({});
-  const [autoEmailDispatched, setAutoEmailDispatched] = useState(false);
 
   // Groq AI connection status (key is stored by the report modal / this popover)
   const [groqKeySaved, setGroqKeySaved] = useState<boolean>(() => {
@@ -270,7 +269,6 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   const [showCoachMenu, setShowCoachMenu] = useState(false);
 
   // AI Posture Feedback State
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [postureAnalysis, setPostureAnalysis] = useState<PostureAnalysisResult>({
     score: 93,
     alignmentStatus: 'Awaiting Pose Start',
@@ -509,7 +507,6 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
         soundEngine.speak('Resuming pose hold.');
       }
     },
-    onAnalyzeTrigger: () => handleTriggerPostureAnalysis(),
     onFinishSession: () => handleCompleteSession(),
   });
 
@@ -778,72 +775,6 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     }));
   };
 
-  // Trigger Gemini Posture Analysis
-  const handleTriggerPostureAnalysis = async () => {
-    if (isAnalyzing || selectedPoseIndex === null) return;
-    const pose = ALL_POSES[selectedPoseIndex];
-    if (!pose) return;
-
-    setIsAnalyzing(true);
-    soundEngine.playAlertTone();
-
-    let snapshotBase64: string | null = uploadedPoseImage || null;
-    if (!snapshotBase64 && videoRef.current && cameraActive) {
-      try {
-        const offscreen = document.createElement('canvas');
-        offscreen.width = videoRef.current.videoWidth || 640;
-        offscreen.height = videoRef.current.videoHeight || 480;
-        const ctx = offscreen.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(videoRef.current, 0, 0, offscreen.width, offscreen.height);
-          snapshotBase64 = offscreen.toDataURL('image/jpeg', 0.8);
-        }
-      } catch (e) {
-        console.warn('Canvas snapshot error:', e);
-      }
-    }
-
-    try {
-      const res = await fetch('/api/analyze-posture', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          poseName: pose.name,
-          sanskritName: pose.sanskritName,
-          imageBase64: snapshotBase64,
-          holdDuration: poseHoldSeconds,
-          userNotes: `Practicing ${pose.name} hold for ${poseHoldSeconds}s with target ${pose.idealHoldDurationSeconds}s`,
-        }),
-      });
-
-      const json = await res.json();
-      if (json.success && json.data) {
-        setPostureAnalysis(json.data);
-
-        setPoseRecords((prev) => ({
-          ...prev,
-          [pose.id]: {
-            poseId: pose.id,
-            poseName: pose.name,
-            sanskritName: pose.sanskritName,
-            durationSeconds: (prev[pose.id]?.durationSeconds || 0) + poseHoldSeconds,
-            accuracyScore: json.data.score || 92,
-            cuesReceived: json.data.keyCues || [],
-            status: 'completed',
-          },
-        }));
-
-        if (voiceSpeechEnabled && json.data.keyCues?.[0]) {
-          soundEngine.speak(json.data.keyCues[0]);
-        }
-      }
-    } catch (err) {
-      console.error('Posture analysis failed:', err);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
   // Next pose switches to next and announces exact next pose name!
   const handleNextPose = () => {
     if (selectedPoseIndex === null) {
@@ -925,24 +856,6 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       caloriesBurnedEst: Math.max(0, Math.round((totalSeconds / 60) * 4.8)),
       calories_burned_est: Math.max(0, Math.round((totalSeconds / 60) * 4.8)),
     };
-
-    // Trigger Automated Background Email Dispatch (No button click required!)
-    const targetEmail = userProfile?.email || '24suca17@tcarts.in';
-    fetch('/api/send-automated-email-report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionData,
-        userEmail: targetEmail,
-        userName,
-      }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        console.log('[AUTO EMAIL SUCCESS]', data);
-        setAutoEmailDispatched(true);
-      })
-      .catch((err) => console.warn('[AUTO EMAIL WARN]', err));
 
     onFinishSession(sessionData);
   };
@@ -1749,16 +1662,6 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                 <span className="hidden sm:inline">{videoFitMode === 'contain' ? 'Full Body Fit' : 'Fill View'}</span>
               </button>
 
-              {/* Trigger Instant AI Analysis */}
-              <button
-                id="trigger-posture-analysis-btn"
-                onClick={handleTriggerPostureAnalysis}
-                disabled={isAnalyzing || selectedPoseIndex === null}
-                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-md shadow-emerald-950/60 cursor-pointer disabled:opacity-50"
-              >
-                <Activity className={`w-3.5 h-3.5 ${isAnalyzing ? 'animate-spin' : ''}`} />
-                <span>{isAnalyzing ? 'Analyzing...' : 'Analyze Form'}</span>
-              </button>
             </div>
 
             <div className="flex items-center gap-2">

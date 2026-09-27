@@ -199,66 +199,10 @@ export async function apiGenerateSessionReport(payload: {
       return res;
     }
   } catch (e) {
-    console.warn('[apiClient] FastAPI generate-session-report fallback, trying relative endpoint:', e);
+    console.warn('[apiClient] Backend generate-session-report failed, using local fallback:', e);
   }
 
-  // 2. Try Relative Endpoint (Express server on port 3000)
-  try {
-    const res = await fetch('/api/generate-session-report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.success && data.data) {
-        return data;
-      }
-    }
-  } catch (e) {
-    console.warn('[apiClient] Relative generate-session-report fallback:', e);
-  }
-
-  // 3. Try direct client-side Groq call if key is provided
-  const groqKey = payload.groqApiKey || localStorage.getItem('groq_api_key');
-  if (groqKey) {
-    try {
-      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${groqKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [
-            {
-              role: 'system',
-              content: `You are Veda AI, an elite yoga therapist and warm master biomechanics coach for ASANA-SENSE. Return a JSON object with overallScore (0-100), flexibilityIndex (string), coreStabilityScore (0-100), boostingMessage (string), comparisonWithPrevious (string), keyStrengths (array of 2-3 strings), priorityGrowthAreas (array of 2-3 strings), masterTeacherNote (string), recommendedNextPoses (array of 3 strings), poseImprovements (array of objects with poseName, currentStatus, actionableTips, jointSafetyCue), fitnessNutrition (object with immediatePostWorkout, dailyStaminaFoods, foodsToAvoid, hydrationTip, dietSummary).`,
-            },
-            {
-              role: 'user',
-              content: `Current Session: ${JSON.stringify(payload.sessionData, null, 2)}`,
-            },
-          ],
-          response_format: { type: 'json_object' },
-          temperature: 0.5,
-        }),
-      });
-      if (groqRes.ok) {
-        const groqData = await groqRes.json();
-        const rawContent = groqData.choices?.[0]?.message?.content || '{}';
-        const clean = rawContent.replace(/^```(?:json)?\s*/gm, '').replace(/\s*```$/gm, '');
-        const parsed = JSON.parse(clean);
-        parsed.aiProvider = 'Groq (Llama 3.3 70B - Direct)';
-        return { success: true, data: parsed };
-      }
-    } catch (directGroqErr) {
-      console.warn('[apiClient] Direct Groq API error:', directGroqErr);
-    }
-  }
-
-  // 4. Guaranteed Client-side Biomechanics & Fitness Fallback
+  // Guaranteed Client-side Biomechanics & Fitness Fallback
   const currentPoses: any[] = payload.sessionData?.posesRecorded || payload.sessionData?.poses_recorded || [];
   const currentScore = payload.sessionData?.overallAccuracy || payload.sessionData?.overall_accuracy || 92;
 
