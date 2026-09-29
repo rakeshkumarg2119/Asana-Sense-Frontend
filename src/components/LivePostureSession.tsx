@@ -46,8 +46,12 @@ import {
   Laptop,
   ArrowLeft,
   Volume2,
+  VolumeX,
   Trophy,
-  Key
+  Key,
+  Settings,
+  Minus,
+  Plus
 } from 'lucide-react';
 import { ALL_POSES } from '../data/yogaPoses';
 import type { YogaPose, PostureAnalysisResult, SessionPoseRecord, PracticeSession, UserProfile, PoseDetectionResult } from '../types';
@@ -56,13 +60,18 @@ import { useVoiceController } from '../hooks/useVoiceController';
 import { usePoseLandmarker } from '../hooks/usePoseLandmarker';
 import { soundEngine } from '../utils/audioFeedback';
 import { AsanaSenseLogo } from './AsanaSenseLogo';
+import { AmbientAudioPlayer } from './AmbientAudioPlayer';
+import { PoseDrawer } from './PoseDrawer';
+import { ViewportHUD } from './ViewportHUD';
 
 interface LivePostureSessionProps {
   userProfile: UserProfile | null;
   onFinishSession: (session: PracticeSession) => void;
   onClose: () => void;
   onOpenAuth: () => void;
+  onOpenSettings?: () => void;
   initialPoseId?: string;
+  onNoPosesPracticed?: () => void;
 }
 
 const POSE_COLOR_PALETTES: Record<string, { ring: string; text: string; bg: string; border: string }> = {
@@ -156,7 +165,9 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   onFinishSession,
   onClose,
   onOpenAuth,
+  onOpenSettings,
   initialPoseId,
+  onNoPosesPracticed,
 }) => {
   // Determine time-of-day greeting
   const getTimeGreeting = () => {
@@ -216,8 +227,12 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Audio / Speech Coaching
+  // Audio / Speech Coaching & Mute State
   const [voiceSpeechEnabled, setVoiceSpeechEnabled] = useState(true);
+
+  useEffect(() => {
+    soundEngine.setMuted(!voiceSpeechEnabled);
+  }, [voiceSpeechEnabled]);
 
   // Play initial greeting or mobile screen warning upon entering session (Single authoritative speech call)
   useEffect(() => {
@@ -253,20 +268,12 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   const [sessionStartTime] = useState(Date.now());
   const [poseRecords, setPoseRecords] = useState<Record<string, SessionPoseRecord>>({});
 
-  // Groq AI connection status (key is stored by the report modal / this popover)
-  const [groqKeySaved, setGroqKeySaved] = useState<boolean>(() => {
-    try {
-      return Boolean(localStorage.getItem('groq_api_key'));
-    } catch {
-      return false;
-    }
-  });
-  const [showGroqPopover, setShowGroqPopover] = useState(false);
-  const [groqKeyDraft, setGroqKeyDraft] = useState('');
+  // Manual Target Hold Duration Control (seconds) - null defaults to pose recommended hold
+  const [manualTargetSeconds, setManualTargetSeconds] = useState<number | null>(null);
+  const targetHoldDuration = manualTargetSeconds ?? (currentPose?.idealHoldDurationSeconds || 30);
 
-  // AI Master Guide Identity (Veda AI default)
-  const [aiCoachName, setAiCoachName] = useState<'Veda AI' | 'Tara AI' | 'Aura AI' | 'Prana AI' | 'Soma AI'>('Veda AI');
-  const [showCoachMenu, setShowCoachMenu] = useState(false);
+  // AI Master Guide Identity (Veda AI Exclusively)
+  const aiCoachName = 'Veda AI';
 
   // AI Posture Feedback State
   const [postureAnalysis, setPostureAnalysis] = useState<PostureAnalysisResult>({
@@ -801,7 +808,8 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     stopCamera();
 
     let finalRecordsMap = { ...poseRecords };
-    if (currentPose) {
+    // Only record currentPose if it was actually held for at least 3 seconds
+    if (currentPose && (poseHoldSeconds >= 3 || (poseRecords[currentPose.id]?.durationSeconds || 0) >= 3)) {
       const existing = poseRecords[currentPose.id];
       const bestHold = Math.max(
         existing?.bestHoldSeconds || 0,
@@ -828,17 +836,29 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       };
     }
 
-    const finalRecords: SessionPoseRecord[] = Object.values(finalRecordsMap);
+    // Filter strictly to poses where practitioner held for at least 3 seconds
+    const finalRecords: SessionPoseRecord[] = Object.values(finalRecordsMap).filter(
+      (r) => (Number(r.durationSeconds || (r as any).duration_seconds || 0) >= 3 || Number(r.bestHoldSeconds || (r as any).best_hold_seconds || 0) >= 3)
+    );
 
-    const avgScore = finalRecords.length > 0
-      ? Math.round(finalRecords.reduce((acc, r) => acc + (r.accuracyScore || (r as any).accuracy_score || 0), 0) / finalRecords.length)
-      : 0;
+    // If no poses were held, do NOT generate a false report!
+    if (finalRecords.length === 0) {
+      if (onNoPosesPracticed) {
+        onNoPosesPracticed();
+      } else {
+        onClose();
+      }
+      return;
+    }
+
+    const avgScore = Math.round(
+      finalRecords.reduce((acc, r) => acc + (r.accuracyScore || (r as any).accuracy_score || 0), 0) / finalRecords.length
+    );
 
     const totalSeconds = totalSessionSeconds > 0 
       ? totalSessionSeconds 
       : finalRecords.reduce((acc, r) => acc + (r.durationSeconds || (r as any).duration_seconds || 0), 0) || poseHoldSeconds;
 
-    // Only real recorded poses are reported (no fabricated fallback pose)
     const sessionPoses: SessionPoseRecord[] = finalRecords;
 
     const sessionData: PracticeSession = {
@@ -880,7 +900,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   };
 
   const holdProgressPercent = currentPose 
-    ? Math.min(100, (poseHoldSeconds / currentPose.idealHoldDurationSeconds) * 100)
+    ? Math.min(100, (poseHoldSeconds / targetHoldDuration) * 100)
     : 0;
 
   // SVG Circular Progress Geometry
@@ -976,44 +996,11 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
         {/* Header Controls */}
         <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
-          {/* AI Master Coach Selector Pill */}
-          <div className="relative">
-            <button
-              onClick={() => setShowCoachMenu(!showCoachMenu)}
-              className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-950 to-teal-950 border border-emerald-500/50 text-xs text-emerald-300 font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:border-emerald-400"
-              title="Click to switch AI Master Guide personality"
-            >
-              <Sparkles className="w-3 h-3 text-emerald-400 animate-pulse" />
-              <span>{aiCoachName}</span>
-              <ChevronDown className="w-3 h-3 text-emerald-400" />
-            </button>
-
-            {/* Coach Selection Dropdown Menu */}
-            {showCoachMenu && (
-              <div className="absolute top-full mt-1.5 left-0 w-44 bg-stone-900 border border-emerald-500/40 rounded-xl shadow-2xl p-1 z-50">
-                <div className="px-2 py-1 text-[10px] uppercase font-bold text-stone-400 border-b border-stone-800">
-                  Select AI Master Guide
-                </div>
-                {(['Veda AI', 'Tara AI', 'Aura AI', 'Prana AI', 'Soma AI'] as const).map((name) => (
-                  <button
-                    key={name}
-                    onClick={() => {
-                      setAiCoachName(name);
-                      setShowCoachMenu(false);
-                      if (voiceSpeechEnabled) {
-                        soundEngine.speak(`${name} is now your biomechanical coach.`);
-                      }
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center justify-between cursor-pointer ${
-                      aiCoachName === name ? 'bg-emerald-800 text-white font-bold' : 'text-stone-300 hover:bg-stone-800'
-                    }`}
-                  >
-                    <span>{name}</span>
-                    {aiCoachName === name && <span className="text-[10px] text-emerald-300">✓ Active</span>}
-                  </button>
-                ))}
-              </div>
-            )}
+          {/* AI Master Coach Badge - Veda AI Exclusively */}
+          <div className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-950 to-teal-950 border border-emerald-500/50 text-xs text-emerald-300 font-bold flex items-center gap-1.5 shadow-xs">
+            <Sparkles className="w-3 h-3 text-emerald-400 animate-pulse" />
+            <span>Veda AI</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">Engine</span>
           </div>
 
           {/* Total Session Time */}
@@ -1057,82 +1044,38 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
             </div>
           )}
 
-          {/* Groq AI status indicator */}
-          <div className="relative">
-            <button
-              id="groq-status-pill"
-              type="button"
-              onClick={() => {
-                setGroqKeyDraft('');
-                setShowGroqPopover((v) => !v);
-              }}
-              className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
-                groqKeySaved
-                  ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/60 hover:border-emerald-400'
-                  : 'bg-stone-800/90 text-stone-300 border-stone-700 hover:bg-stone-700/90'
-              }`}
-              title={groqKeySaved ? 'Groq AI key saved - your report will use Llama 3.3 70B' : 'No personal Groq key saved - the report uses the server key or built-in engine. Click to add one.'}
-            >
-              <span className={`inline-flex h-2 w-2 rounded-full ${groqKeySaved ? 'bg-emerald-400' : 'bg-stone-500'}`} />
-              <Key className={`w-3.5 h-3.5 ${groqKeySaved ? 'text-emerald-400' : 'text-stone-400'}`} />
-              <span className="hidden sm:inline">{groqKeySaved ? 'Groq AI Connected' : 'Groq AI Auto'}</span>
-            </button>
-
-            {showGroqPopover && (
-              <div className="absolute top-full right-0 mt-1.5 z-40 w-64 p-3 rounded-2xl bg-stone-900/95 border border-stone-700 shadow-2xl backdrop-blur-md space-y-2">
-                <div className="text-[11px] text-stone-300 leading-relaxed">
-                  {groqKeySaved
-                    ? 'Your Groq key is saved. Your end-of-session report will use llama-3.3-70b-versatile.'
-                    : 'Paste a Groq API key (gsk_...) to power your end-of-session AI report.'}
-                </div>
-                <input
-                  type="password"
-                  value={groqKeyDraft}
-                  onChange={(e) => setGroqKeyDraft(e.target.value)}
-                  placeholder="gsk_..."
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-stone-800 border border-stone-600 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={!groqKeyDraft.trim()}
-                    onClick={() => {
-                      try {
-                        localStorage.setItem('groq_api_key', groqKeyDraft.trim());
-                        setGroqKeySaved(true);
-                      } catch {
-                        /* storage unavailable */
-                      }
-                      setGroqKeyDraft('');
-                      setShowGroqPopover(false);
-                    }}
-                    className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold cursor-pointer"
-                  >
-                    Save Key
-                  </button>
-                  {groqKeySaved && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        try {
-                          localStorage.removeItem('groq_api_key');
-                        } catch {
-                          /* ignore */
-                        }
-                        setGroqKeySaved(false);
-                        setShowGroqPopover(false);
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-rose-300 text-xs font-semibold cursor-pointer"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </div>
+          {/* Dedicated Voice Audio Spoken Feedback Mute / Unmute Toggle */}
+          <button
+            id="voice-audio-mute-toggle-btn"
+            type="button"
+            onClick={() => {
+              const nextVal = !voiceSpeechEnabled;
+              setVoiceSpeechEnabled(nextVal);
+              soundEngine.setMuted(!nextVal);
+            }}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none ${
+              voiceSpeechEnabled
+                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/60 hover:border-emerald-400'
+                : 'bg-amber-950/80 text-amber-300 border-amber-500/60 hover:bg-amber-900/80'
+            }`}
+            title={
+              voiceSpeechEnabled
+                ? 'Voice Audio Feedback: ON (Click to Mute Spoken Feedback)'
+                : 'Voice Audio Feedback: MUTED (Click to Enable Spoken Feedback)'
+            }
+          >
+            {voiceSpeechEnabled ? (
+              <Volume2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            ) : (
+              <VolumeX className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             )}
-          </div>
+            <span className="hidden sm:inline font-medium">
+              {voiceSpeechEnabled ? 'Voice Audio: On' : 'Voice Audio: Muted'}
+            </span>
+          </button>
+
+          {/* Ambient Meditative Music Soundscapes & Custom Audio Player */}
+          <AmbientAudioPlayer />
 
           {/* Dedicated Voice-Command Toggle Switch (Auto Opens Movable Commands Table) */}
           <div className="relative">
@@ -1330,295 +1273,31 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               </div>
             )}
 
-            {/* Movable Voice Commands Reference Table Floating Overlay */}
-            <AnimatePresence>
-              {showVoiceCmdTable && (
-                <motion.div
-                  drag
-                  dragMomentum={false}
-                  dragConstraints={containerRef}
-                  initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  className="absolute top-12 left-3 z-40 bg-stone-900/95 border border-emerald-500/70 rounded-2xl p-2.5 shadow-2xl backdrop-blur-md text-white w-60 sm:w-64 cursor-grab active:cursor-grabbing pointer-events-auto"
-                >
-                  <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-stone-700/80">
-                    <div className="flex items-center gap-1.5">
-                      <Sliders className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="text-[11px] font-bold text-emerald-300">Voice Commands (Movable)</span>
-                    </div>
-                    <button
-                      onClick={() => setShowVoiceCmdTable(false)}
-                      className="w-5 h-5 rounded-full bg-stone-800 hover:bg-stone-700 flex items-center justify-center text-stone-400 hover:text-white transition cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-
-                  <p className="text-[9px] text-stone-300 mb-1.5">
-                    🖐️ <em>Drag box to move anywhere in camera viewport.</em>
-                  </p>
-
-                  <div ref={voiceTableScrollRef} className="max-h-56 overflow-y-auto pr-1 space-y-1.5 text-[10px] scrollbar-thin">
-                    <div className="rounded-lg bg-stone-950/90 p-2 border border-stone-800">
-                      <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider block mb-0.5">🗣️ Exact Voice Commands</span>
-                      <div className="space-y-1 text-stone-200 font-mono text-[10px]">
-                        <div>• <strong className="text-amber-300">"switch to [pose name]"</strong> → e.g. "switch to tree pose"</div>
-                        <div>• <strong className="text-amber-300">"open poses"</strong> / <strong className="text-amber-300">"open poses table"</strong> → Open 8 Poses Grid</div>
-                        <div>• <strong className="text-amber-300">"open voice table"</strong> → Toggle Voice Table Overlay</div>
-                        <div>• <strong className="text-amber-300">"preview pose"</strong> → Selected Pose details</div>
-                        <div>• <strong className="text-emerald-300">"turn on camera"</strong> / <strong className="text-emerald-300">"turn off camera"</strong></div>
-                        <div>• <strong className="text-emerald-300">"next pose"</strong> / <strong className="text-emerald-300">"previous pose"</strong></div>
-                        <div>• <strong className="text-emerald-300">"scroll down poses"</strong> / <strong className="text-emerald-300">"scroll up poses"</strong></div>
-                        <div>• <strong className="text-emerald-300">"scroll down voice"</strong> / <strong className="text-emerald-300">"scroll up voice"</strong></div>
-                        <div>• <strong className="text-emerald-300">"close pose table"</strong> / <strong className="text-emerald-300">"close voice table"</strong></div>
-                        <div>• <strong className="text-emerald-300">"close preview"</strong> / <strong className="text-emerald-300">"finish session"</strong></div>
-                        <div>• <strong className="text-emerald-300">"I'm ready"</strong> / <strong className="text-emerald-300">"Pause"</strong> / <strong className="text-emerald-300">"Resume"</strong></div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg bg-stone-950/90 p-2 border border-stone-800">
-                      <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider block mb-0.5">🧘 8 Asana Names</span>
-                      <div className="grid grid-cols-2 gap-0.5 text-[10px] font-mono text-stone-300">
-                        <span>• "Warrior 3"</span>
-                        <span>• "Tree Pose"</span>
-                        <span>• "Triangle Pose"</span>
-                        <span>• "Downward Dog"</span>
-                        <span>• "Cobra Pose"</span>
-                        <span>• "Bridge Pose"</span>
-                        <span>• "Lotus Pose"</span>
-                        <span>• "Child's Pose"</span>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* =================================================================== */}
-            {/* OVERLAY HUD (TOP ACCURACY, HOLD TIMER & REAL-TIME GUIDANCE)          */}
-            {/* =================================================================== */}
-            <div className="absolute inset-0 pointer-events-none p-3 sm:p-4 flex flex-col justify-between z-20">
-              
-              {/* Top HUD Ribbon */}
-              <div className="flex items-start justify-between gap-2 flex-wrap">
-                {/* Accuracy Score Pill */}
-                {(() => {
-                  const hasRedJoint = Boolean(
-                    modelPoseResult?.has_red ||
-                    modelPoseResult?.joints?.some(
-                      (j) => j.status === 'critical' || (j.status as string) === 'red' || j.deviation >= 3.5
-                    ) ||
-                    (modelPoseResult && currentPose?.model_class_name && modelPoseResult.predicted_pose !== 'no_pose' &&
-                      !isPoseMatch(modelPoseResult.predicted_pose, currentPose.model_class_name))
-                  );
-                  return (
-                    <div className="px-3 py-1.5 rounded-2xl bg-stone-950/85 backdrop-blur-md border border-emerald-500/50 text-xs font-mono text-emerald-300 flex items-center gap-2 shadow-lg">
-                      <span className={`w-2 h-2 rounded-full ${
-                        !isPoseActive
-                          ? 'bg-amber-400'
-                          : modelPoseResult?.is_correct
-                          ? 'bg-emerald-400 animate-ping'
-                          : hasRedJoint
-                          ? 'bg-rose-500'
-                          : 'bg-yellow-400'
-                      }`} />
-                      <span>Alignment:</span>
-                      <strong className="text-white text-sm font-black">
-                        {!isPoseActive
-                          ? 'Standby'
-                          : modelPoseResult?.is_correct
-                          ? '✓ Perfect (100%)'
-                          : modelPoseResult?.predicted_pose === 'no_pose'
-                          ? 'No Yoga Pose'
-                          : hasRedJoint
-                          ? `${postureAnalysis.score}% (Mistake 🔴)`
-                          : `${postureAnalysis.score}% (Holding - Adjust 🟡)`}
-                      </strong>
-                    </div>
-                  );
-                })()}
-
-                {/* Framing Fit Mode Badge Toggle Tag */}
-                <button
-                  onClick={() => setVideoFitMode(videoFitMode === 'contain' ? 'cover' : 'contain')}
-                  className="px-3 py-1.5 rounded-2xl bg-stone-950/85 backdrop-blur-md border border-emerald-500/50 text-xs font-mono text-emerald-300 flex items-center gap-1.5 shadow-lg pointer-events-auto cursor-pointer hover:bg-stone-900/90 transition"
-                  title="Click to toggle Full Body Fit vs Wide Fill"
-                >
-                  <Scan className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Framing: {videoFitMode === 'contain' ? 'Full Body Fit 🎯' : 'Fill View 🔍'}</span>
-                </button>
-
-                {/* POSE HOLD TIMER RING */}
-                {currentPose && (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="bg-stone-950/90 backdrop-blur-md border border-emerald-500/40 rounded-2xl p-2.5 flex items-center gap-2.5 shadow-xl pointer-events-auto"
-                  >
-                    {/* SVG Circular Progress Ring */}
-                    <div className="relative w-12 h-12 flex items-center justify-center">
-                      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 80 80">
-                        <circle
-                          cx="40"
-                          cy="40"
-                          r={circleRadius}
-                          className="stroke-stone-800"
-                          strokeWidth="5"
-                          fill="transparent"
-                        />
-                        <circle
-                          cx="40"
-                          cy="40"
-                          r={circleRadius}
-                          className={`transition-all duration-500 ease-out ${
-                            modelPoseResult?.is_correct
-                              ? 'stroke-emerald-400'
-                              : (modelPoseResult?.has_red || modelPoseResult?.joints?.some(j => j.status === 'critical' || j.deviation >= 3.5))
-                              ? 'stroke-rose-500'
-                              : 'stroke-yellow-400'
-                          }`}
-                          strokeWidth="5"
-                          strokeDasharray={circleCircumference}
-                          strokeDashoffset={strokeDashoffset}
-                          strokeLinecap="round"
-                          fill="transparent"
-                        />
-                      </svg>
-
-                      {/* Center Hold Seconds */}
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                        <span className="text-xs font-mono font-bold text-white leading-tight">
-                          {poseHoldSeconds}s
-                        </span>
-                        <span className="text-[7px] text-emerald-300 font-mono">
-                          /{currentPose.idealHoldDurationSeconds}s
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Hold Status Details & Personal Best Streak */}
-                    <div className="pr-1">
-                      <div className="flex items-center gap-1">
-                        <Timer className="w-3 h-3 text-emerald-400" />
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-300">
-                          Hold Streak
-                        </span>
-                      </div>
-                      <span className="text-[11px] font-bold text-white block mt-0.5">
-                        {!isPoseActive 
-                          ? 'Waiting to Start' 
-                          : modelPoseResult?.is_correct
-                            ? 'All Joints Correct 🟢'
-                            : modelPoseResult?.predicted_pose === 'no_pose'
-                            ? 'Normal Pose (Paused) ⏸️'
-                            : (modelPoseResult?.has_red || modelPoseResult?.joints?.some(j => j.status === 'critical' || j.deviation >= 3.5))
-                            ? 'Mistake Detected 🔴'
-                            : 'Holding Pose (Adjusting 🟡)'}
-                      </span>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-[9px] text-amber-300 font-bold bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-500/40">
-                          Beat Best: {bestHoldPerPose[currentPose.id] || 0}s
-                        </span>
-                        <span className="text-[9px] text-stone-400 font-medium">
-                          Target: {currentPose.idealHoldDurationSeconds}s
-                        </span>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </div>
-
-              {/* CELEBRATION TOAST: NEW PERSONAL BEST STREAK */}
-              <AnimatePresence>
-                {personalBestToast && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.8, y: -20 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.8, y: -20 }}
-                    className="self-center pointer-events-auto bg-gradient-to-r from-amber-500 via-emerald-600 to-teal-600 border-2 border-amber-300 rounded-3xl p-3.5 text-center shadow-2xl max-w-md w-full my-2"
-                  >
-                    <div className="flex items-center justify-center gap-2 text-white font-black text-xs uppercase tracking-wider">
-                      <Trophy className="w-4 h-4 text-amber-200 fill-amber-300 animate-bounce" />
-                      <span>🎉 NEW PERSONAL BEST STREAK RECORD!</span>
-                    </div>
-                    <p className="text-xs font-bold text-amber-100 mt-1">
-                      {personalBestToast.poseName}: Held for <strong className="text-white text-sm">{personalBestToast.seconds} seconds</strong> (beat prior {personalBestToast.prior}s hold)!
-                    </p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Ready Gate Floating Center Banner if Pose is Selected but Not Active */}
-              {currentPose && !isPoseActive && (
-                <div className="self-center pointer-events-auto bg-stone-950/95 backdrop-blur-md border border-emerald-500/60 rounded-3xl p-4 sm:p-5 text-center shadow-2xl max-w-md w-full animate-in fade-in zoom-in duration-300">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center mx-auto mb-2 border border-emerald-500/30">
-                    <Sparkle className="w-5 h-5 animate-spin" />
-                  </div>
-                  <h4 className="text-base font-bold text-white">
-                    Ready to practice {currentPose.name}?
-                  </h4>
-                  <p className="text-xs text-stone-300 mt-1 mb-3">
-                    Target hold: <strong>{currentPose.idealHoldDurationSeconds} seconds</strong>. Click below or say <em>"I'm ready"</em> to start live posture tracking.
-                  </p>
-
-                  <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
-                    <button
-                      onClick={handleConfirmReadyAndStart}
-                      className="w-full sm:w-auto px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 cursor-pointer"
-                    >
-                      <Play className="w-4 h-4 fill-white" />
-                      <span>I'm Ready • Start {currentPose.name}</span>
-                    </button>
-
-                    {!cameraActive && (
-                      <button
-                        onClick={startCamera}
-                        className="w-full sm:w-auto px-4 py-2.5 rounded-2xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer border border-stone-700"
-                      >
-                        <Camera className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Turn On Camera</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Bottom Row: AI Master Coach Correction Guidance Banner */}
-              <div className="space-y-1.5 pointer-events-auto">
-                <motion.div 
-                  key={postureAnalysis.keyCues[0] || 'guide'}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-gradient-to-r from-stone-950/95 via-[#0d1624]/95 to-stone-950/95 backdrop-blur-md border border-stone-700/80 rounded-2xl p-3 shadow-xl flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
-                        <Sparkles className="w-3 h-3 text-emerald-400 animate-spin" />
-                        {aiCoachName} Guidance • {postureAnalysis.alignmentStatus}
-                      </span>
-                    </div>
-                    <p className="text-xs text-stone-100 font-medium truncate leading-snug">
-                      👉 {postureAnalysis.keyCues[0] || 'Select an asana and click Ready when in position.'}
-                    </p>
-                  </div>
-
-                  {/* Badges container: side-by-side with vertical centering */}
-                  <div className="shrink-0 flex items-center gap-2">
-                    {voiceController.lastCommandRecognized && (
-                      <span className="text-[10px] px-2.5 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/40 font-semibold flex items-center justify-center whitespace-nowrap">
-                        {voiceController.lastCommandRecognized}
-                      </span>
-                    )}
-                    <div className="bg-stone-900/90 border border-emerald-500/40 px-3 py-1.5 rounded-xl text-[10px] text-emerald-300 font-semibold flex items-center gap-1.5 whitespace-nowrap">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Real-Time Biomechanics Active</span>
-                    </div>
-                  </div>
-                </motion.div>
-              </div>
-            </div>
+            {/* Viewport HUD: Accuracy, Hold Timer Ring, Manual Duration, Personal Best Celebration, Ready Prompt & AI Guidance */}
+            <ViewportHUD
+              currentPose={currentPose}
+              isPoseActive={isPoseActive}
+              cameraActive={cameraActive}
+              videoFitMode={videoFitMode}
+              modelPoseResult={modelPoseResult}
+              postureAnalysis={postureAnalysis}
+              poseHoldSeconds={poseHoldSeconds}
+              targetHoldDuration={targetHoldDuration}
+              manualTargetSeconds={manualTargetSeconds}
+              bestHoldPerPose={bestHoldPerPose}
+              personalBestToast={personalBestToast}
+              aiCoachName={aiCoachName}
+              lastVoiceCommand={voiceController.lastCommandRecognized}
+              showVoiceCmdTable={showVoiceCmdTable}
+              containerRef={containerRef}
+              voiceTableScrollRef={voiceTableScrollRef}
+              isPoseMatch={isPoseMatch}
+              onSetVideoFitMode={setVideoFitMode}
+              onSetManualTargetSeconds={setManualTargetSeconds}
+              onConfirmReadyAndStart={handleConfirmReadyAndStart}
+              onStartCamera={startCamera}
+              onCloseVoiceTable={() => setShowVoiceCmdTable(false)}
+            />
           </div>
 
           {/* Action Bar (Camera Toggle, Full-Body Framing, Start/Pause, Analyze Form, Prev/Next) */}
@@ -1712,262 +1391,25 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
         {/* ======================================================================= */}
         <AnimatePresence mode="wait">
           {isDrawerOpen ? (
-            <motion.div
-              key="yoga-pose-drawer"
-              initial={{ opacity: 0, x: 30 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 30 }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
-              style={{ width: window.innerWidth >= 1024 ? `${100 - splitPercent}%` : '100%' }}
-              className="flex flex-col space-y-2.5 min-w-0 transition-[width] duration-75 lg:pl-2.5 h-full min-h-0 relative z-30 pointer-events-auto"
-            >
-              {/* Drawer Main Container */}
-              <div className="bg-stone-900/95 rounded-3xl p-3.5 sm:p-4 border border-stone-800 shadow-2xl flex flex-col h-full min-h-0 overflow-hidden">
-                
-                {/* Drawer Header */}
-                <div className="flex items-center justify-between pb-3 border-b border-stone-800 shrink-0 gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center border border-emerald-500/30 shrink-0">
-                      <Sliders className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="truncate">
-                      <h2 className="text-xs font-bold text-white uppercase tracking-wider truncate">
-                        Yoga Pose (8 Poses)
-                      </h2>
-                      <p className="text-[10px] text-stone-400 truncate">
-                        {drawerShelfMode === 'grid' ? '8 Asanas Shelves (2×4 Table Grid)' : `${currentPose?.name || 'Select Asana'} • Pros & Cons`}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {/* Switch between Full 2x4 Grid and Shrunken/Card Mode */}
-                    <button
-                      onClick={() => setDrawerShelfMode(drawerShelfMode === 'grid' ? 'card' : 'grid')}
-                      className={`px-2.5 py-1.5 rounded-xl text-[10px] font-bold transition flex items-center gap-1 cursor-pointer border ${
-                        drawerShelfMode === 'grid'
-                          ? 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700'
-                          : 'bg-emerald-600/90 text-white border-emerald-500 hover:bg-emerald-500 shadow-xs'
-                      }`}
-                      title={drawerShelfMode === 'grid' ? 'Collapse table into Focused Pose Details' : 'Expand back to 2×4 Grid'}
-                    >
-                      <Grid className="w-3 h-3" />
-                      <span>{drawerShelfMode === 'grid' ? 'Focus Pose Details' : '2×4 Grid'}</span>
-                    </button>
-
-                    <button
-                      onClick={() => setIsDrawerOpen(false)}
-                      className="p-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-white transition cursor-pointer"
-                      title="Hide Yoga Pose Drawer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Scrollable Drawer Content */}
-                <div ref={poseGridScrollRef} className="flex-1 overflow-y-auto pr-1 py-3 space-y-4 scrollbar-thin scrollbar-thumb-stone-700">
-                  
-                  {/* CASE 1: FULL 2×4 GRID TABLE VIEW */}
-                  {drawerShelfMode === 'grid' ? (
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-                          Select Asana From 2×4 Shelves (Click to Select):
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2.5">
-                        {ALL_POSES.map((pose, idx) => {
-                          const isSelected = idx === selectedPoseIndex;
-                          const isDone = (poseRecords[pose.id]?.durationSeconds || 0) > 0;
-
-                          return (
-                            <motion.button
-                              key={pose.id}
-                              onClick={() => handleSelectPose(idx)}
-                              whileHover={{ scale: 1.02 }}
-                              whileTap={{ scale: 0.98 }}
-                              className={`p-2.5 rounded-2xl border text-left transition cursor-pointer flex flex-col justify-between relative group ${
-                                isSelected
-                                  ? `bg-stone-800/90 border-emerald-500 ring-2 ring-emerald-400 shadow-md`
-                                  : 'bg-stone-950/80 border-stone-800 hover:border-stone-700'
-                              }`}
-                            >
-                              <div className="aspect-[4/3] w-full rounded-xl overflow-hidden bg-stone-950 mb-2 relative">
-                                <img
-                                  src={pose.imageUrl}
-                                  alt={pose.name}
-                                  className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                                  referrerPolicy="no-referrer"
-                                />
-                                {isDone && (
-                                  <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-bold shadow-xs">
-                                    ✓
-                                  </span>
-                                )}
-                              </div>
-
-                              <div>
-                                <span className={`text-[11px] font-bold block truncate leading-tight ${isSelected ? 'text-emerald-300' : 'text-stone-200'}`}>
-                                  {pose.name}
-                                </span>
-                                <span className="text-[9px] text-stone-400 font-serif italic block truncate">
-                                  {pose.sanskritName}
-                                </span>
-                              </div>
-                            </motion.button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : (
-                    /* CASE 2: CLEAN DETAIL-ONLY VIEW (POSE IMAGE + PROS & CONS) */
-                    currentPose ? (
-                      <div className="space-y-4">
-                        <div className="bg-stone-950/90 rounded-2xl p-4 border border-stone-800 space-y-3.5">
-                          {/* Header & Tabs */}
-                          <div className="flex items-center justify-between gap-1 flex-wrap">
-                            <div>
-                              <span className={`text-[10px] font-bold font-serif italic ${poseTheme.text}`}>
-                                {currentPose.sanskritName}
-                              </span>
-                              <h3 className="text-base font-bold text-white leading-tight">
-                                {currentPose.name}
-                              </h3>
-                            </div>
-
-                            {/* Tabs: All / Pros / Cons */}
-                            <div className="flex items-center bg-stone-900 p-0.5 rounded-lg border border-stone-800 text-[10px]">
-                              <button
-                                onClick={() => setActiveCardTab('all')}
-                                className={`px-2 py-0.5 rounded font-bold transition cursor-pointer ${
-                                  activeCardTab === 'all' ? 'bg-emerald-700 text-white' : 'text-stone-400 hover:text-white'
-                                }`}
-                              >
-                                All
-                              </button>
-                              <button
-                                onClick={() => setActiveCardTab('pros')}
-                                className={`px-2 py-0.5 rounded font-bold transition cursor-pointer flex items-center gap-0.5 ${
-                                  activeCardTab === 'pros' ? 'bg-emerald-600 text-white' : 'text-emerald-400 hover:text-emerald-300'
-                                }`}
-                              >
-                                <ThumbsUp className="w-2.5 h-2.5" /> Pros
-                              </button>
-                              <button
-                                onClick={() => setActiveCardTab('cons')}
-                                className={`px-2 py-0.5 rounded font-bold transition cursor-pointer flex items-center gap-0.5 ${
-                                  activeCardTab === 'cons' ? 'bg-rose-700 text-white' : 'text-rose-400 hover:text-rose-300'
-                                }`}
-                              >
-                                <ThumbsDown className="w-2.5 h-2.5" /> Cons
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Pose Image Reference */}
-                          <div className="aspect-[16/10] w-full rounded-xl overflow-hidden bg-stone-900 border border-stone-800 relative">
-                            {referenceDisplayMode === 'photo' ? (
-                              <img
-                                src={currentPose.imageUrl}
-                                alt={currentPose.name}
-                                className="w-full h-full object-cover"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center p-3">
-                                <PoseVisualArtwork poseId={currentPose.id} highlightJoints={true} />
-                              </div>
-                            )}
-
-                            <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-lg bg-stone-950/80 text-[9px] text-stone-200 font-semibold backdrop-blur-xs">
-                              Hold: {currentPose.idealHoldDurationSeconds}s
-                            </div>
-
-                            <button
-                              onClick={() => setReferenceDisplayMode(referenceDisplayMode === 'photo' ? 'artwork' : 'photo')}
-                              className="absolute top-1.5 right-1.5 px-2 py-0.5 rounded-lg bg-stone-950/80 text-[9px] text-stone-300 hover:text-white backdrop-blur-xs cursor-pointer border border-stone-700"
-                            >
-                              {referenceDisplayMode === 'photo' ? '⚡ Skeleton' : '📷 Photo'}
-                            </button>
-                          </div>
-
-                          {/* Start Pose Button Inside Drawer for quick activation */}
-                          {!isPoseActive && (
-                            <button
-                              onClick={handleConfirmReadyAndStart}
-                              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer"
-                            >
-                              <Play className="w-3.5 h-3.5 fill-white" />
-                              <span>I'm Ready • Start {currentPose.name}</span>
-                            </button>
-                          )}
-
-                          {/* PROS (Benefits & Target Muscles) */}
-                          {(activeCardTab === 'all' || activeCardTab === 'pros') && (
-                            <div className="bg-emerald-950/50 border border-emerald-600/40 rounded-xl p-3 space-y-2 text-xs">
-                              <div className="flex items-center justify-between text-emerald-400 font-bold text-[11px]">
-                                <span className="flex items-center gap-1.5">
-                                  <ThumbsUp className="w-3.5 h-3.5 text-emerald-400" /> PROS: Benefits & Muscles
-                                </span>
-                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300">
-                                  Positive
-                                </span>
-                              </div>
-                              <ul className="text-stone-200 text-[11px] space-y-1.5">
-                                {currentPose.benefits.map((b, i) => (
-                                  <li key={i} className="flex items-start gap-1.5">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                                    <span>{b}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                              <div className="pt-1.5 border-t border-emerald-800/40 flex flex-wrap gap-1">
-                                {currentPose.targetMuscles.map((m) => (
-                                  <span key={m} className="px-2 py-0.5 rounded bg-stone-900 text-stone-300 text-[9px]">
-                                    {m}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* CONS (Wrong Posture Impacts & Danger Zones) */}
-                          {(activeCardTab === 'all' || activeCardTab === 'cons') && (
-                            <div className="bg-rose-950/50 border border-rose-600/40 rounded-xl p-3 space-y-2 text-xs">
-                              <div className="flex items-center justify-between text-rose-400 font-bold text-[11px]">
-                                <span className="flex items-center gap-1.5">
-                                  <ThumbsDown className="w-3.5 h-3.5 text-rose-400" /> CONS: Mistakes & Risks
-                                </span>
-                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300">
-                                  Harmful Errors
-                                </span>
-                              </div>
-                              <div className="space-y-2">
-                                {currentPose.wrongPostureImpacts.map((w, i) => (
-                                  <div key={i} className="bg-stone-950/80 p-2.5 rounded-lg border border-rose-900/40 text-[10px] space-y-1">
-                                    <p className="text-rose-200 font-bold flex items-center gap-1">
-                                      <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                                      {w.mistake}
-                                    </p>
-                                    <p className="text-rose-300/80"><strong>Risk:</strong> {w.impact}</p>
-                                    <p className="text-emerald-300"><strong>Correction:</strong> {w.correction}</p>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-6 text-center text-stone-400 text-xs">
-                        Click on any pose from the 2×4 grid to view details.
-                      </div>
-                    )
-                  )}
-                </div>
-              </div>
-            </motion.div>
+            <PoseDrawer
+              isDrawerOpen={isDrawerOpen}
+              splitPercent={splitPercent}
+              drawerShelfMode={drawerShelfMode}
+              activeCardTab={activeCardTab}
+              referenceDisplayMode={referenceDisplayMode}
+              selectedPoseIndex={selectedPoseIndex}
+              currentPose={currentPose}
+              poseTheme={poseTheme}
+              poseRecords={poseRecords}
+              isPoseActive={isPoseActive}
+              poseGridScrollRef={poseGridScrollRef}
+              onCloseDrawer={() => setIsDrawerOpen(false)}
+              onSetDrawerShelfMode={setDrawerShelfMode}
+              onSetActiveCardTab={setActiveCardTab}
+              onSetReferenceDisplayMode={setReferenceDisplayMode}
+              onSelectPose={handleSelectPose}
+              onConfirmReadyAndStart={handleConfirmReadyAndStart}
+            />
           ) : showVoiceCmdTable ? (
             <motion.div
               key="voice-cmd-side-table"

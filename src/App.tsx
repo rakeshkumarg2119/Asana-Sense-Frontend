@@ -14,18 +14,73 @@ import { PoseDetailModal } from './components/PoseDetailModal';
 import { AuthModal } from './components/AuthModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { PreSessionOnboardingModal } from './components/PreSessionOnboardingModal';
+import { BackendSettingsModal } from './components/BackendSettingsModal';
+import { ResetPasswordModal } from './components/ResetPasswordModal';
+import { CookieConsentBanner } from './components/CookieConsentBanner';
+import { PrivacyTermsModal } from './components/PrivacyTermsModal';
 import { AppLoading } from './components/AppLoading';
 import { SessionLoadingTransition } from './components/SessionLoadingTransition';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Footer } from './components/Footer';
+import { NotFoundPage } from './components/NotFoundPage';
+import { WelcomeToast } from './components/WelcomeToast';
+import { Info, X, WifiOff, Server, AlertTriangle, RefreshCw, Settings as SettingsIcon, Sparkles, Mail, CheckCircle2 } from 'lucide-react';
 import type { UserProfile, YogaPose, PracticeSession } from './types';
 import { getStoredUserProfile, saveUserProfile, saveSessionRecord, fetchUserProfileFromAPI } from './utils/profileStorage';
-import { getToken, apiLogout } from './utils/apiClient';
+import { getToken, apiLogout, apiHealthCheck, getBackendUrl } from './utils/apiClient';
 import { fetchPosesFromAPI, ALL_POSES } from './data/yogaPoses';
+import { soundEngine } from './utils/audioFeedback';
 
 export default function App() {
+  // 404 Route state
+  const [isNotFound, setIsNotFound] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname.toLowerCase().trim();
+      return path !== '/' && path !== '' && path !== '/index.html';
+    }
+    return false;
+  });
+
   // User profile & auth state
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+
+  // Welcome new signup toast
+  const [welcomeToast, setWelcomeToast] = useState<{ name: string; email: string } | null>(null);
+
+  // Empty session notice toast
+  const [emptySessionNotice, setEmptySessionNotice] = useState<string | null>(null);
+
+  // Backend offline modal state
+  const [serverDownModalOpen, setServerDownModalOpen] = useState(false);
+  const [isRetryingConnection, setIsRetryingConnection] = useState(false);
+  const [pendingPoseAfterCheck, setPendingPoseAfterCheck] = useState<string | undefined>(undefined);
+
+  // Auto-dismiss welcome toast after 8 seconds
+  useEffect(() => {
+    if (welcomeToast) {
+      const timer = setTimeout(() => setWelcomeToast(null), 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [welcomeToast]);
+
+  // Listen to browser navigation & URL route changes
+  useEffect(() => {
+    const handleLocationCheck = () => {
+      const path = window.location.pathname.toLowerCase().trim();
+      const validPaths = ['/', '', '/index.html'];
+      setIsNotFound(!validPaths.includes(path));
+    };
+
+    window.addEventListener('popstate', handleLocationCheck);
+    return () => window.removeEventListener('popstate', handleLocationCheck);
+  }, []);
+
+  useEffect(() => {
+    if (emptySessionNotice) {
+      const timer = setTimeout(() => setEmptySessionNotice(null), 5500);
+      return () => clearTimeout(timer);
+    }
+  }, [emptySessionNotice]);
 
   // Poses from API or fallback
   const [poses, setPoses] = useState<YogaPose[]>(ALL_POSES);
@@ -56,10 +111,31 @@ export default function App() {
   // Modals state
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
+  const [resetPasswordModalOpen, setResetPasswordModalOpen] = useState(false);
+  const [resetPasswordToken, setResetPasswordToken] = useState('');
+  const [resetPasswordEmail, setResetPasswordEmail] = useState('');
+  const [privacyTermsModalOpen, setPrivacyTermsModalOpen] = useState(false);
+  const [privacyTermsTab, setPrivacyTermsTab] = useState<'privacy' | 'terms' | 'disclaimer'>('privacy');
   const [onboardingModalOpen, setOnboardingModalOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [backendSettingsOpen, setBackendSettingsOpen] = useState(false);
   const [inspectingPose, setInspectingPose] = useState<YogaPose | null>(null);
   const [completedSession, setCompletedSession] = useState<PracticeSession | null>(null);
+
+  // Check URL query parameters for direct password reset link (?mode=reset-password&token=...&email=...)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const modeParam = params.get('mode');
+      const tokenParam = params.get('token');
+      const emailParam = params.get('email');
+      if (modeParam === 'reset-password' || tokenParam) {
+        if (tokenParam) setResetPasswordToken(tokenParam);
+        if (emailParam) setResetPasswordEmail(emailParam);
+        setResetPasswordModalOpen(true);
+      }
+    }
+  }, []);
 
   // Load user profile from API on mount (if JWT token exists)
   useEffect(() => {
@@ -138,13 +214,27 @@ export default function App() {
     }
   };
 
-  // Central Session Trigger: launches Live Session with launch loading screen
-  const handleInitiateSession = (poseId?: string) => {
+  // Central Session Trigger: performs pre-flight FastAPI health check before entering live session
+  const handleInitiateSession = async (poseId?: string) => {
     if (!userProfile) {
       setPendingPoseId(poseId);
       setPendingStartSession(true);
       setAuthMode('signup');
       setAuthModalOpen(true);
+      return;
+    }
+
+    // Pre-flight check: Verify FastAPI backend is online
+    try {
+      const isOnline = await apiHealthCheck();
+      if (!isOnline) {
+        setPendingPoseAfterCheck(poseId);
+        setServerDownModalOpen(true);
+        return;
+      }
+    } catch {
+      setPendingPoseAfterCheck(poseId);
+      setServerDownModalOpen(true);
       return;
     }
 
@@ -166,20 +256,54 @@ export default function App() {
     });
   };
 
+  // Retry Connection from Server Down Dialog
+  const handleRetryBackendCheck = async () => {
+    setIsRetryingConnection(true);
+    try {
+      const isOnline = await apiHealthCheck();
+      if (isOnline) {
+        setServerDownModalOpen(false);
+        setIsRetryingConnection(false);
+        const poseToStart = pendingPoseAfterCheck;
+        setPendingPoseAfterCheck(undefined);
+        handleInitiateSession(poseToStart);
+        return;
+      }
+    } catch {
+      // Still offline
+    }
+    setIsRetryingConnection(false);
+  };
+
   const handleOpenAuth = (mode: 'signin' | 'signup' = 'signup') => {
     setAuthMode(mode);
     setAuthModalOpen(true);
   };
 
   // On Auth success
-  const handleAuthSuccess = (profile: UserProfile) => {
-    setUserProfile(profile);
+  const handleAuthSuccess = (profile: UserProfile, isNewSignUp = false) => {
     saveUserProfile(profile);
+    const resolvedProfile = getStoredUserProfile() || profile;
+    setUserProfile(resolvedProfile);
     sessionStorage.setItem('asana_signed_in', 'true');
     sessionStorage.removeItem('asana_entered_session');
     sessionStorage.removeItem('asana_exited_session');
     sessionStorage.removeItem('asana_generated_report');
     setIsInitialSignInAnimation(true);
+
+    const cleanEmail = (resolvedProfile.email || '').trim().toLowerCase();
+    const hasSeenWelcome = cleanEmail ? localStorage.getItem(`asana_welcomed_${cleanEmail}`) === 'true' : false;
+
+    if (isNewSignUp && !hasSeenWelcome) {
+      if (cleanEmail) {
+        localStorage.setItem(`asana_welcomed_${cleanEmail}`, 'true');
+      }
+      setWelcomeToast({ name: resolvedProfile.name, email: resolvedProfile.email || '' });
+      soundEngine.playChime(528, 1.8);
+      setTimeout(() => {
+        soundEngine.speak(`Welcome to Asana Sense, ${resolvedProfile.name}! Your mindful yoga journey begins today.`);
+      }, 500);
+    }
 
     if (pendingStartSession) {
       setPendingStartSession(false);
@@ -192,7 +316,7 @@ export default function App() {
       triggerViewTransition('live-session', 'Preparing Live Studio...', () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
       });
-    } else if (!profile.has_completed_onboarding && !profile.hasCompletedOnboarding) {
+    } else if (isNewSignUp && !profile.has_completed_onboarding && !profile.hasCompletedOnboarding) {
       setOnboardingModalOpen(true);
     }
   };
@@ -221,10 +345,20 @@ export default function App() {
 
   // On Session finished: synthesize report and open as in-session overlay directly over the active session
   const handleSessionFinished = (session: PracticeSession) => {
+    // If session has no recorded poses or holds, do not synthesize report!
+    const validPoses = (session.posesRecorded || (session as any).poses_recorded || []).filter(
+      (p: any) => (Number(p.durationSeconds || p.duration_seconds || 0) >= 3 || Number(p.bestHoldSeconds || p.best_hold_seconds || 0) >= 3)
+    );
+    if (validPoses.length === 0) {
+      handleExitSession();
+      setEmptySessionNotice('Session ended. No poses were held during this session, so no report was generated.');
+      return;
+    }
+
     setIsInitialSignInAnimation(false);
     setSessionTransition({
       mode: 'exit',
-      customMessage: 'Synthesizing Groq AI Posture Insights & Report...',
+      customMessage: 'Synthesizing Veda AI Biomechanics Insights & Session Report...',
       onComplete: () => {
         setSessionTransition(null);
         setCompletedSession(session);
@@ -277,15 +411,67 @@ export default function App() {
     !userExitedStorage
   );
 
+  // Handle Back to Homepage from 404 page
+  const handleBackHome = () => {
+    window.history.pushState(null, '', '/');
+    setIsNotFound(false);
+    setActiveView('home');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  if (isNotFound) {
+    return <NotFoundPage onBackHome={handleBackHome} />;
+  }
+
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col font-sans selection:bg-emerald-200 selection:text-emerald-900">
       {isAppLoading && <AppLoading message={loadingMessage} />}
+
+      {/* Welcome Celebration Banner Toast upon New Account Sign-Up */}
+      {welcomeToast && (
+        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 max-w-lg w-[92%] sm:w-auto px-5 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/95 via-stone-900/95 to-teal-950/95 text-stone-100 text-xs sm:text-sm font-medium shadow-2xl border border-emerald-400/50 backdrop-blur-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 ring-4 ring-emerald-500/10">
+          <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0 text-emerald-400 shadow-inner">
+            <Sparkles className="w-4 h-4 animate-spin" style={{ animationDuration: '4s' }} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 text-emerald-300 font-bold text-xs uppercase tracking-wider">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Welcome to ASANA - SENSE, {welcomeToast.name}!</span>
+            </div>
+            <p className="text-[11px] sm:text-xs text-stone-300 mt-0.5 leading-relaxed">
+              Your mindful yoga journey begins today. A welcome confirmation has been prepared for <span className="font-semibold text-emerald-300">{welcomeToast.email}</span>.
+            </p>
+          </div>
+          <button
+            onClick={() => setWelcomeToast(null)}
+            className="p-1.5 text-stone-400 hover:text-white rounded-lg transition ml-1 cursor-pointer shrink-0 hover:bg-stone-800/80"
+            title="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Empty Session Feedback Notification Toast */}
+      {emptySessionNotice && (
+        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-stone-900/95 text-stone-200 text-xs sm:text-sm font-medium shadow-2xl border border-emerald-500/40 backdrop-blur-md flex items-center gap-2.5 animate-in fade-in slide-in-from-top-4 duration-300">
+          <Info className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{emptySessionNotice}</span>
+          <button
+            onClick={() => setEmptySessionNotice(null)}
+            className="p-1 text-stone-400 hover:text-white rounded-lg transition ml-1 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {activeView === 'home' && (
         <Navbar
           userProfile={userProfile}
           onOpenAuth={handleOpenAuth}
           onOpenProfile={() => setProfileModalOpen(true)}
+          onOpenSettings={() => setBackendSettingsOpen(true)}
           onStartLiveSession={() => handleInitiateSession(undefined)}
           onScrollToSection={handleScrollToSection}
         />
@@ -303,6 +489,11 @@ export default function App() {
             onFinishSession={handleSessionFinished}
             onClose={() => handleExitSession()}
             onOpenAuth={() => handleOpenAuth('signup')}
+            onOpenSettings={() => setBackendSettingsOpen(true)}
+            onNoPosesPracticed={() => {
+              handleExitSession();
+              setEmptySessionNotice('Session ended. No poses were held during this session, so no report was generated.');
+            }}
           />
         </ErrorBoundary>
       ) : (
@@ -338,8 +529,19 @@ export default function App() {
         <Footer
           onScrollTo={handleScrollToSection}
           onOpenLiveSession={() => handleInitiateSession(undefined)}
+          onOpenSettings={() => setBackendSettingsOpen(true)}
+          onOpenPrivacyTerms={(tab) => {
+            setPrivacyTermsTab(tab);
+            setPrivacyTermsModalOpen(true);
+          }}
         />
       )}
+
+      <PrivacyTermsModal
+        isOpen={privacyTermsModalOpen}
+        initialTab={privacyTermsTab}
+        onClose={() => setPrivacyTermsModalOpen(false)}
+      />
 
       <AuthModal
         isOpen={authModalOpen}
@@ -349,7 +551,25 @@ export default function App() {
           setPendingStartSession(false);
         }}
         onAuthSuccess={handleAuthSuccess}
+        onOpenResetPasswordModal={(prefilledEmail) => {
+          if (prefilledEmail) setResetPasswordEmail(prefilledEmail);
+          setResetPasswordModalOpen(true);
+        }}
       />
+
+      <ResetPasswordModal
+        isOpen={resetPasswordModalOpen}
+        initialEmail={resetPasswordEmail}
+        initialToken={resetPasswordToken}
+        onClose={() => setResetPasswordModalOpen(false)}
+        onSuccessOpenSignIn={(email) => {
+          setResetPasswordModalOpen(false);
+          setAuthMode('signin');
+          setAuthModalOpen(true);
+        }}
+      />
+
+      <CookieConsentBanner />
 
       {userProfile && (
         <PreSessionOnboardingModal
@@ -371,6 +591,7 @@ export default function App() {
           onLogout={handleLogout}
           onSelectPastSession={(sess) => setCompletedSession(sess)}
           onOpenOnboarding={() => setOnboardingModalOpen(true)}
+          onUpdateUser={(updated) => setUserProfile(updated)}
         />
       )}
 
@@ -382,6 +603,11 @@ export default function App() {
         />
       )}
 
+      <BackendSettingsModal
+        isOpen={backendSettingsOpen}
+        onClose={() => setBackendSettingsOpen(false)}
+      />
+
       {completedSession && (
         <ErrorBoundary
           fullScreen
@@ -391,6 +617,7 @@ export default function App() {
           <SessionReportModal
             session={completedSession}
             userProfile={userProfile}
+            isHistoryView={activeView === 'home'}
             onClose={() => setCompletedSession(null)}
             // 1. Continue in session: simply hides the modal overlay; activeView stays 'live-session'
             onReturnToSession={() => {
@@ -429,6 +656,85 @@ export default function App() {
           targetPoseName={sessionTransition.targetPoseName}
           customMessage={sessionTransition.customMessage}
           onComplete={sessionTransition.onComplete}
+        />
+      )}
+
+      {/* FastAPI Backend Server Down Modal */}
+      {serverDownModalOpen && (
+        <div
+          id="server-down-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setServerDownModalOpen(false);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-950/80 backdrop-blur-sm animate-in fade-in"
+        >
+          <div
+            className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-200 text-stone-900 relative text-center space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-inner">
+              <WifiOff className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 text-[10px] font-bold border border-rose-200 uppercase tracking-wider inline-block">
+                Connection Required
+              </span>
+              <h3 className="text-xl font-serif font-bold text-stone-900">
+                FastAPI Server is Offline
+              </h3>
+              <p className="text-xs text-stone-600 leading-relaxed">
+                The live posture studio requires your running <strong>FastAPI Python backend</strong> ({getBackendUrl()}) for biomechanical angle calculations and pose classification.
+              </p>
+            </div>
+
+            <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200 text-left font-mono text-[11px] space-y-1 text-stone-700">
+              <div className="text-[10px] font-bold text-stone-400 uppercase tracking-wider font-sans">Start Server Command:</div>
+              <div className="text-emerald-700 font-bold bg-white p-2 rounded-xl border border-stone-200 truncate">
+                uvicorn main:app --host 0.0.0.0 --port 8000
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setServerDownModalOpen(false);
+                  setBackendSettingsOpen(true);
+                }}
+                className="w-full py-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <SettingsIcon className="w-3.5 h-3.5" />
+                <span>Configure URL</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleRetryBackendCheck}
+                disabled={isRetryingConnection}
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition cursor-pointer shadow-md shadow-emerald-900/20 disabled:opacity-60 flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? 'animate-spin' : ''}`} />
+                <span>{isRetryingConnection ? 'Testing...' : 'Retry Connection'}</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setServerDownModalOpen(false)}
+              className="text-xs text-stone-400 hover:text-stone-600 transition block mx-auto cursor-pointer"
+            >
+              Stay on Sanctuary Dashboard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* New User Signup Welcome Toast Notification */}
+      {welcomeToast && (
+        <WelcomeToast
+          name={welcomeToast.name}
+          email={welcomeToast.email}
+          onClose={() => setWelcomeToast(null)}
         />
       )}
     </div>

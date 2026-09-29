@@ -14,7 +14,7 @@ import {
   Utensils 
 } from 'lucide-react';
 import { UserProfile } from '../types';
-import { saveUserProfile } from '../utils/profileStorage';
+import { saveUserProfile, updateProfileOnAPI } from '../utils/profileStorage';
 
 interface PreSessionOnboardingModalProps {
   isOpen: boolean;
@@ -33,12 +33,12 @@ export const PreSessionOnboardingModal: React.FC<PreSessionOnboardingModalProps>
 
   // Question 1: Age Category
   const [ageCategory, setAgeCategory] = useState<'18-25' | '26-40' | '41-60' | '60+'>(
-    userProfile.ageCategory || '26-40'
+    (userProfile.ageCategory as '18-25' | '26-40' | '41-60' | '60+') || '26-40'
   );
 
   // Question 2: Yoga Experience
   const [experienceLevel, setExperienceLevel] = useState<'Beginner' | 'Intermediate' | 'Advanced'>(
-    userProfile.experienceLevel || 'Beginner'
+    (userProfile.experienceLevel as 'Beginner' | 'Intermediate' | 'Advanced') || 'Beginner'
   );
 
   // Question 3: Biometrics for in-page BMI calculation
@@ -129,6 +129,12 @@ export const PreSessionOnboardingModal: React.FC<PreSessionOnboardingModalProps>
     };
 
     saveUserProfile(updatedProfile);
+    updateProfileOnAPI({
+      has_completed_onboarding: true,
+      age_category: ageCategory,
+      experience_level: experienceLevel,
+      bmi_data: updatedProfile.bmiData,
+    }).catch((err) => console.warn('API sync warning:', err));
     onComplete(updatedProfile);
   };
 

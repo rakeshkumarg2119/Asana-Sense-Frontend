@@ -112,15 +112,6 @@ const bestHoldOf = (p: any): number =>
   safeNum(p?.bestHoldSeconds ?? p?.best_hold_seconds, 0) || totalHoldOf(p);
 const accuracyOf = (p: any): number => Math.round(safeNum(p?.accuracyScore ?? p?.accuracy_score, 0));
 
-const GROQ_KEY_STORAGE = 'groq_api_key';
-const readGroqKey = (): string => {
-  try {
-    return localStorage.getItem(GROQ_KEY_STORAGE) || '';
-  } catch {
-    return '';
-  }
-};
-
 interface PoseImprovementView {
   poseName: string;
   currentStatus: string;
@@ -169,6 +160,7 @@ interface SessionReportModalProps {
   onReturnToSession?: () => void;
   onExitToDashboard?: () => void;
   previousSession?: PracticeSession | null;
+  isHistoryView?: boolean;
 }
 
 interface CooldownStretch {
@@ -247,18 +239,22 @@ export const SessionReportModal: React.FC<SessionReportModalProps> = ({
   onReturnToSession,
   onExitToDashboard,
   previousSession: previousSessionProp,
+  isHistoryView = false,
 }) => {
   const exitingRef = useRef(false);
   const [showCloseConfirmation, setShowCloseConfirmation] = useState(false);
 
-  // Every way of leaving the report (X, footer, backdrop, Escape, Exit to Dashboard) funnels here so the
-  // parent can always play the animated "Returning to Sanctuary Dashboard..." loading screen.
+  // Every way of leaving the report (X, footer, backdrop, Escape, Exit to Dashboard) funnels here
   const handleExit = useCallback(() => {
+    if (isHistoryView) {
+      onClose();
+      return;
+    }
     if (exitingRef.current) return;
     exitingRef.current = true;
     if (onExitToDashboard) onExitToDashboard();
     else onClose();
-  }, [onExitToDashboard, onClose]);
+  }, [isHistoryView, onExitToDashboard, onClose]);
 
   // Real recorded poses only (no fabricated fallback data)
   const recordedPoses = useMemo(() => {
@@ -350,51 +346,10 @@ export const SessionReportModal: React.FC<SessionReportModalProps> = ({
   const [reportNotice, setReportNotice] = useState('');
   const reportRequestRef = useRef(0);
 
-  // Automated email dispatch state (fires automatically; no manual input needed)
-  const [emailStatus, setEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'error' | 'unconfigured'>('idle');
-  const [emailSentTo, setEmailSentTo] = useState<string>('');
-  const [emailErrorMsg, setEmailErrorMsg] = useState<string>('');
-  const emailSentRef = useRef(false);
   const [copiedSummary, setCopiedSummary] = useState(false);
 
-  // Groq API connection state
-  const [groqKey, setGroqKey] = useState<string>(() => readGroqKey());
-  const [showGroqPanel, setShowGroqPanel] = useState(false);
-  const [groqInput, setGroqInput] = useState('');
-  const [showGroqKeyText, setShowGroqKeyText] = useState(false);
-  const [groqTest, setGroqTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'error'; message: string }>({ state: 'idle', message: '' });
-
-  // Auto-dispatch SMTP email once AI report is ready and user is authenticated.
-  // Fires exactly once per modal open. Requires SMTP_USER / SMTP_PASSWORD in backend .env.
-  useEffect(() => {
-    if (emailSentRef.current) return;          // already sent this session
-    if (isLoadingReport) return;               // wait for AI report to be ready
-    if (!userProfile?.email) return;           // guest user — skip
-    if (!getToken()) return;                   // not authenticated — skip
-
-    emailSentRef.current = true;
-    setEmailStatus('sending');
-
-    apiSendSessionEmail({ sessionData: session, aiReport })
-      .then((res) => {
-        setEmailSentTo(res.to_email || userProfile.email || '');
-        setEmailStatus('sent');
-      })
-      .catch((err: any) => {
-        const msg: string = err?.message || '';
-        if (/smtp.*credential|not configured/i.test(msg)) {
-          setEmailStatus('unconfigured');
-        } else {
-          setEmailStatus('error');
-          setEmailErrorMsg(msg);
-        }
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoadingReport]);
-
-  // Generate (or regenerate) the AI report. apiGenerateSessionReport tries FastAPI :8000, then the
-  // Express endpoint, then a direct Groq call, then a local heuristic - so it always resolves.
-  const generateReport = useCallback(async (keyOverride?: string) => {
+  // Generate (or regenerate) the AI report via the backend API
+  const generateReport = useCallback(async () => {
     const requestId = ++reportRequestRef.current;
     setIsLoadingReport(true);
     setReportNotice('');
@@ -402,18 +357,17 @@ export const SessionReportModal: React.FC<SessionReportModalProps> = ({
       const res = await apiGenerateSessionReport({
         sessionData: session,
         previousSessionData: priorSession,
-        groqApiKey: (keyOverride ?? readGroqKey()) || undefined,
       });
       if (requestId !== reportRequestRef.current) return;
       if (res?.success && res.data && typeof res.data === 'object') {
         setAiReport(res.data);
       } else {
-        setReportNotice('AI insights are unavailable right now, showing your session telemetry instead.');
+        setReportNotice('FastAPI server down. Unable to fetch remote AI report.');
       }
     } catch (err) {
       console.warn('[SessionReportModal] report generation failed:', err);
       if (requestId === reportRequestRef.current) {
-        setReportNotice('AI insights are unavailable right now, showing your session telemetry instead.');
+        setReportNotice('FastAPI server down. Unable to fetch remote AI report.');
       }
     } finally {
       if (requestId === reportRequestRef.current) setIsLoadingReport(false);
@@ -431,78 +385,19 @@ export const SessionReportModal: React.FC<SessionReportModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id]);
 
-  // Escape key: closes confirmation dialog or Groq panel first, otherwise triggers confirmation
+  // Escape key: closes report directly if in history view, else triggers confirmation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (showCloseConfirmation) {
-        setShowCloseConfirmation(false);
-      } else if (showGroqPanel) {
-        setShowGroqPanel(false);
+      if (isHistoryView) {
+        onClose();
       } else {
         setShowCloseConfirmation(true);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showCloseConfirmation, showGroqPanel]);
-
-  const openGroqPanel = () => {
-    setGroqInput(groqKey);
-    setGroqTest({ state: 'idle', message: '' });
-    setShowGroqKeyText(false);
-    setShowGroqPanel(true);
-  };
-
-  const testGroqKey = async (keyToTest: string): Promise<boolean> => {
-    const key = keyToTest.trim();
-    if (!key) {
-      setGroqTest({ state: 'error', message: 'Paste your Groq API key first (starts with gsk_).' });
-      return false;
-    }
-    setGroqTest({ state: 'testing', message: 'Testing key with Groq...' });
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/models', {
-        headers: { Authorization: `Bearer ${key}` },
-      });
-      if (res.ok) {
-        setGroqTest({ state: 'ok', message: 'Key verified. llama-3.3-70b-versatile is ready.' });
-        return true;
-      }
-      setGroqTest({
-        state: 'error',
-        message: res.status === 401 ? 'Groq rejected this key (401). Check it and try again.' : `Groq returned an error (${res.status}).`,
-      });
-      return false;
-    } catch {
-      setGroqTest({ state: 'error', message: 'Could not reach Groq. Check your internet connection.' });
-      return false;
-    }
-  };
-
-  const handleSaveGroqKey = async () => {
-    const key = groqInput.trim();
-    if (!key) return;
-    try {
-      localStorage.setItem(GROQ_KEY_STORAGE, key);
-    } catch {
-      /* storage blocked - key still used for this regeneration */
-    }
-    setGroqKey(key);
-    setShowGroqPanel(false);
-    await generateReport(key);
-  };
-
-  const handleRemoveGroqKey = () => {
-    try {
-      localStorage.removeItem(GROQ_KEY_STORAGE);
-    } catch {
-      /* ignore */
-    }
-    setGroqKey('');
-    setGroqInput('');
-    setGroqTest({ state: 'idle', message: 'Key removed from this browser.' });
-  };
+  }, [isHistoryView, onClose]);
 
   // Normalized, always-renderable view of the AI report
   const view = useMemo(() => {
@@ -728,7 +623,7 @@ Generated securely by ASANA - SENSE AI Vision Studio
         <body>
           <div class="header">
             <h1 class="title">ASANA - SENSE</h1>
-            <div class="subtitle">Yoga Biomechanics Master Progress Report (Powered by Groq AI)</div>
+            <div class="subtitle">Yoga Biomechanics Master Progress Report (Veda AI Engine)</div>
             <div class="meta">
               Date: <strong>${dateStr}</strong> | Yogi: <strong>${esc(userProfile ? userProfile.name : 'Practitioner')}</strong> | Vault ID: <strong>${((userProfile as any)?.encryptionKeyHash || userProfile?.id || 'VAULT-SECURE').slice(0, 10)}</strong>
             </div>
@@ -843,7 +738,11 @@ Generated securely by ASANA - SENSE AI Vision Studio
       id="session-report-modal" 
       onClick={(e) => {
         if (e.target === e.currentTarget) {
-          setShowCloseConfirmation(true);
+          if (isHistoryView) {
+            onClose();
+          } else {
+            setShowCloseConfirmation(true);
+          }
         }
       }}
       className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-5 bg-stone-950/80 backdrop-blur-md"
@@ -869,26 +768,6 @@ Generated securely by ASANA - SENSE AI Vision Studio
                   <Zap className="w-3 h-3 text-emerald-600" />
                   {providerBadge}
                 </span>
-                {emailStatus === 'sent' && (
-                  <span className="px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 text-[10px] font-bold flex items-center gap-1">
-                    <Check className="w-3 h-3 text-teal-600" />
-                    Mailed to {emailSentTo || userProfile?.email}
-                  </span>
-                )}
-                <button
-                  id="groq-connect-pill"
-                  type="button"
-                  onClick={openGroqPanel}
-                  title={groqKey ? 'Groq API key saved in this browser. Click to manage.' : 'Add your Groq API key to power the report with Llama 3.3 70B'}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 cursor-pointer transition ${
-                    groqKey
-                      ? 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700'
-                      : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
-                  }`}
-                >
-                  <Key className="w-3 h-3" />
-                  {groqKey ? 'Groq Connected' : 'Connect Groq API'}
-                </button>
               </div>
               <h2 className="text-xl sm:text-2xl font-serif font-bold text-stone-900 leading-tight">
                 Yoga Biomechanics Master Report
@@ -898,7 +777,13 @@ Generated securely by ASANA - SENSE AI Vision Studio
 
           <button
             type="button"
-            onClick={() => setShowCloseConfirmation(true)}
+            onClick={() => {
+              if (isHistoryView) {
+                onClose();
+              } else {
+                setShowCloseConfirmation(true);
+              }
+            }}
             aria-label="Close Report"
             className="w-9 h-9 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition flex items-center justify-center cursor-pointer shrink-0"
           >
@@ -937,7 +822,7 @@ Generated securely by ASANA - SENSE AI Vision Studio
           </div>
 
           {/* ========================================================================= */}
-          {/* GROQ AI BOOSTING MESSAGE & HUMAN PROGRESS COMPARISON CARD                 */}
+          {/* VEDA AI BOOSTING MESSAGE & HUMAN PROGRESS COMPARISON CARD                 */}
           {/* ========================================================================= */}
           <div className="bg-gradient-to-br from-emerald-900 via-teal-950 to-stone-950 rounded-2xl p-4 sm:p-5 text-white border border-emerald-500/40 shadow-lg space-y-3.5">
             <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -947,7 +832,7 @@ Generated securely by ASANA - SENSE AI Vision Studio
                 </div>
                 <div>
                   <h3 className="text-sm font-bold tracking-wide text-white">
-                    Groq AI Personalized Coaching & Progress
+                    Veda AI Personalized Coaching & Progress
                   </h3>
                   <p className="text-[11px] text-emerald-300">
                     Human-understandable posture evaluation & encouragement
@@ -982,12 +867,6 @@ Generated securely by ASANA - SENSE AI Vision Studio
               <div className="p-2.5 rounded-xl bg-amber-950/50 border border-amber-500/30 text-[11px] text-amber-200 flex items-center gap-2">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-300 shrink-0" />
                 <span>{reportNotice}</span>
-              </div>
-            )}
-            {!isLoadingReport && groqKey && !usedGroq && !reportNotice && (
-              <div className="p-2.5 rounded-xl bg-stone-900/70 border border-stone-700 text-[11px] text-stone-300 flex items-center gap-2">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                <span>Your Groq key is saved, but this report came from "{view.provider}". Make sure the backend uses the groqApiKey sent with the request.</span>
               </div>
             )}
 
@@ -1235,108 +1114,7 @@ Generated securely by ASANA - SENSE AI Vision Studio
             )}
           </div>
 
-          {/* ========================================================================= */}
-          {/* AUTOMATED EMAIL DISPATCH & DELIVERY STATUS                               */}
-          {/* ========================================================================= */}
-          <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 space-y-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center">
-                  <Mail className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider">
-                    Automated Session Report Dispatch
-                  </h4>
-                  <p className="text-[11px] text-stone-500">
-                    Certified PDF report automatically delivered to your registered email
-                  </p>
-                </div>
-              </div>
-              {/* Status badge */}
-              {emailStatus === 'sending' && (
-                <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 text-[10px] font-bold border border-amber-200 flex items-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  Sending...
-                </span>
-              )}
-              {emailStatus === 'sent' && (
-                <span className="px-2.5 py-1 rounded-full bg-teal-50 text-teal-800 text-[10px] font-bold border border-teal-200">
-                  ✅ Delivered
-                </span>
-              )}
-              {emailStatus === 'error' && (
-                <span className="px-2.5 py-1 rounded-full bg-red-50 text-red-700 text-[10px] font-bold border border-red-200">
-                  ⚠ Send Failed
-                </span>
-              )}
-              {emailStatus === 'unconfigured' && (
-                <span className="px-2.5 py-1 rounded-full bg-stone-100 text-stone-600 text-[10px] font-bold border border-stone-300">
-                  SMTP Not Configured
-                </span>
-              )}
-              {emailStatus === 'idle' && userProfile?.email && (
-                <span className="px-2.5 py-1 rounded-full bg-stone-100 text-stone-500 text-[10px] font-bold border border-stone-200">
-                  Queued
-                </span>
-              )}
-            </div>
 
-            {/* Status messages */}
-            {emailStatus === 'sent' && (
-              <p className="text-[11px] text-teal-800 font-medium flex items-center gap-1.5 bg-teal-50 p-2.5 rounded-xl border border-teal-100">
-                <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                <span>
-                  Your <strong>Certified Yoga Biomechanics PDF Report</strong> has been automatically dispatched to{' '}
-                  <strong>{emailSentTo || userProfile?.email}</strong>. Check your inbox!
-                </span>
-              </p>
-            )}
-            {emailStatus === 'sending' && (
-              <p className="text-[11px] text-amber-800 flex items-center gap-1.5 bg-amber-50 p-2.5 rounded-xl border border-amber-100">
-                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                Generating your certified PDF and sending it to <strong>{userProfile?.email}</strong>…
-              </p>
-            )}
-            {emailStatus === 'error' && (
-              <p className="text-[11px] text-red-700 flex items-center gap-1.5 bg-red-50 p-2.5 rounded-xl border border-red-100">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                Email delivery failed: {emailErrorMsg || 'Server error. Please check SMTP config in backend/.env.'}
-              </p>
-            )}
-            {emailStatus === 'unconfigured' && (
-              <p className="text-[11px] text-stone-600 flex items-center gap-1.5 bg-stone-100 p-2.5 rounded-xl border border-stone-200">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                SMTP not configured in backend. Set <code className="bg-stone-200 px-1 rounded text-[10px]">SMTP_USER</code> and <code className="bg-stone-200 px-1 rounded text-[10px]">SMTP_PASSWORD</code> in <code className="bg-stone-200 px-1 rounded text-[10px]">backend/.env</code>.
-              </p>
-            )}
-            {!userProfile?.email && (
-              <p className="text-[11px] text-stone-500 flex items-center gap-1.5 bg-stone-100 p-2.5 rounded-xl border border-stone-200">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                Sign in to receive automated certified PDF reports to your registered email.
-              </p>
-            )}
-
-            {/* Copy + mailto fallback actions */}
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <button
-                onClick={handleTriggerMailTo}
-                className="px-3.5 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
-                title="Open native mail app with pre-formatted report body"
-              >
-                <Mail className="w-3.5 h-3.5" />
-                Open in Mail App
-              </button>
-              <button
-                onClick={handleCopySummary}
-                className="px-3 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-medium text-xs flex items-center gap-1.5 transition cursor-pointer"
-                title="Copy full report text"
-              >
-                {copiedSummary ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                {copiedSummary ? 'Copied!' : 'Copy Report'}
-              </button>
-            </div>
-          </div>
 
           {/* ========================================================================= */}
           {/* DYNAMIC POST-SESSION STRETCHES SECTION (Suggested Stretches)              */}
@@ -1530,150 +1308,41 @@ Generated securely by ASANA - SENSE AI Vision Studio
             >
               Practice Again
             </button>
-            <button
-              id="close-report-modal-btn"
-              type="button"
-              onClick={() => setShowCloseConfirmation(true)}
-              className="px-4 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-800 font-semibold text-xs transition cursor-pointer"
-            >
-              Close Report
-            </button>
-            <button
-              id="exit-to-dashboard-btn"
-              type="button"
-              onClick={handleExit}
-              className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs transition cursor-pointer"
-            >
-              Exit to Dashboard
-            </button>
+            {isHistoryView ? (
+              <button
+                id="close-report-modal-btn"
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs transition cursor-pointer"
+              >
+                Close Report
+              </button>
+            ) : (
+              <>
+                <button
+                  id="close-report-modal-btn"
+                  type="button"
+                  onClick={() => setShowCloseConfirmation(true)}
+                  className="px-4 py-2 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-800 font-semibold text-xs transition cursor-pointer"
+                >
+                  Close Report
+                </button>
+                <button
+                  id="exit-to-dashboard-btn"
+                  type="button"
+                  onClick={handleExit}
+                  className="px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs transition cursor-pointer"
+                >
+                  Exit to Dashboard
+                </button>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Groq API connection panel */}
+        {/* Exit / Return Confirmation Dialog Overlay (Only when finishing an active live session) */}
         <AnimatePresence>
-          {showGroqPanel && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={(e) => {
-                if (e.target === e.currentTarget) setShowGroqPanel(false);
-              }}
-              className="absolute inset-0 z-40 bg-stone-950/70 backdrop-blur-xs flex items-center justify-center p-4"
-            >
-              <motion.div
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="bg-white rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl border border-stone-200 space-y-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                      <Key className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-serif font-bold text-stone-900 leading-tight">Connect Groq API</h3>
-                      <p className="text-[11px] text-stone-500">Powers this report with llama-3.3-70b-versatile</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowGroqPanel(false)}
-                    aria-label="Close Groq panel"
-                    className="w-8 h-8 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 flex items-center justify-center cursor-pointer shrink-0"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label htmlFor="groq-key-input" className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
-                    Groq API key
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="groq-key-input"
-                      type={showGroqKeyText ? 'text' : 'password'}
-                      value={groqInput}
-                      onChange={(e) => {
-                        setGroqInput(e.target.value);
-                        if (groqTest.state !== 'idle') setGroqTest({ state: 'idle', message: '' });
-                      }}
-                      placeholder="gsk_..."
-                      autoComplete="off"
-                      spellCheck={false}
-                      className="w-full pl-3 pr-10 py-2.5 text-xs rounded-xl bg-stone-50 border border-stone-300 text-stone-800 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowGroqKeyText((v) => !v)}
-                      aria-label={showGroqKeyText ? 'Hide key' : 'Show key'}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 cursor-pointer"
-                    >
-                      {showGroqKeyText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-stone-400 leading-relaxed">
-                    Stored only in this browser (localStorage) and sent with your report request. Get a free key at console.groq.com.
-                  </p>
-                </div>
-
-                {groqTest.message && (
-                  <div
-                    className={`p-2.5 rounded-xl text-[11px] flex items-center gap-2 border ${
-                      groqTest.state === 'ok'
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                        : groqTest.state === 'error'
-                        ? 'bg-rose-50 border-rose-200 text-rose-800'
-                        : 'bg-stone-50 border-stone-200 text-stone-600'
-                    }`}
-                  >
-                    {groqTest.state === 'testing' && <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />}
-                    {groqTest.state === 'ok' && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
-                    {groqTest.state === 'error' && <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
-                    <span>{groqTest.message}</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => testGroqKey(groqInput)}
-                    disabled={groqTest.state === 'testing' || !groqInput.trim()}
-                    className="py-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 disabled:opacity-50 text-stone-800 font-semibold text-xs transition cursor-pointer"
-                  >
-                    Test Key
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSaveGroqKey}
-                    disabled={!groqInput.trim()}
-                    className="py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs transition cursor-pointer shadow-md shadow-emerald-900/15 flex items-center justify-center gap-1.5"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Save &amp; Regenerate
-                  </button>
-                </div>
-
-                {groqKey && (
-                  <button
-                    type="button"
-                    onClick={handleRemoveGroqKey}
-                    className="w-full py-2 rounded-xl text-rose-700 hover:bg-rose-50 text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Remove saved key
-                  </button>
-                )}
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Exit / Return Confirmation Dialog Overlay */}
-        <AnimatePresence>
-          {showCloseConfirmation && (
+          {!isHistoryView && showCloseConfirmation && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

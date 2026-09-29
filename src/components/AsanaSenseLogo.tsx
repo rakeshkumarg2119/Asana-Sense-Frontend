@@ -1,5 +1,6 @@
 import React from 'react';
-import logoImg from '../../assets/asana_sense_logo.png';
+
+const CLOUDINARY_LOGO_URL = 'https://res.cloudinary.com/yhj7u0bn/image/upload/v1790602123/asana_sense_logo.png';
 
 interface AsanaSenseLogoProps {
   size?: 'sm' | 'md' | 'lg';
@@ -25,9 +26,10 @@ export const AsanaSenseLogo: React.FC<AsanaSenseLogoProps> = ({
       {/* Brand Icon Mark */}
       <div className={`relative group/logo ${iconSizes[size]} flex items-center justify-center shrink-0`}>
         <img 
-          src={logoImg} 
+          src={CLOUDINARY_LOGO_URL} 
           alt="Asana Sense Logo" 
           className="w-full h-full object-contain transition-transform duration-300 group-hover/logo:scale-105 drop-shadow-sm"
+          loading="eager"
         />
       </div>
 

@@ -36,7 +36,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   onExplorePoses,
 }) => {
   return (
-    <section className="relative pt-8 pb-16 px-6 sm:px-10 lg:px-14 max-w-[1720px] w-full mx-auto overflow-hidden">
+    <section className="relative z-0 pt-6 sm:pt-8 pb-12 sm:pb-16 px-3.5 sm:px-8 lg:px-14 max-w-[1720px] w-full mx-auto overflow-hidden">
       {/* Decorative ambient background accents */}
       <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-emerald-100/50 rounded-full blur-3xl -z-10 pointer-events-none" />
       <div className="absolute bottom-10 left-1/6 w-[450px] h-[450px] bg-teal-100/40 rounded-full blur-3xl -z-10 pointer-events-none" />

@@ -171,7 +171,18 @@ export function usePoseLandmarker({
 
     connect();
 
+    const handleBackendChange = () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      connect();
+    };
+
+    window.addEventListener('asana_backend_changed', handleBackendChange);
+
     return () => {
+      window.removeEventListener('asana_backend_changed', handleBackendChange);
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;

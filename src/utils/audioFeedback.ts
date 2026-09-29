@@ -1,6 +1,18 @@
 // Web Audio API pure synthesized Tibetan singing bowl & chime feedback sounds
 class SoundEngine {
   private ctx: AudioContext | null = null;
+  private muted: boolean = false;
+
+  setMuted(isMuted: boolean) {
+    this.muted = isMuted;
+    if (isMuted && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }
+
+  isMuted(): boolean {
+    return this.muted;
+  }
 
   private getContext(): AudioContext {
     if (!this.ctx) {
@@ -15,6 +27,7 @@ class SoundEngine {
 
   // Play peaceful meditation singing bowl harmonic chime
   playChime(frequency: number = 432, duration: number = 1.6) {
+    if (this.muted) return;
     try {
       const ctx = this.getContext();
       const osc = ctx.createOscillator();
@@ -46,6 +59,7 @@ class SoundEngine {
 
   // Gentle posture correction alert (soft double pulse)
   playAlertTone() {
+    if (this.muted) return;
     try {
       const ctx = this.getContext();
       const osc = ctx.createOscillator();
@@ -73,7 +87,7 @@ class SoundEngine {
 
   // Speak voice instruction via browser speech synthesis
   speak(text: string) {
-    if (!('speechSynthesis' in window) || !text) return;
+    if (this.muted || !('speechSynthesis' in window) || !text) return;
 
     // 1. Collapse stray single-letter spacing ("R A K E S H" -> "Rakesh")
     let clean = text
@@ -83,10 +97,7 @@ class SoundEngine {
       });
 
     // 2. Convert ALL-CAPS words (length >= 2) into Title Case (e.g. "PRAVEEN" -> "Praveen", "YOGI" -> "Yogi")
-    // Browser SpeechSynthesis treats uppercase words as acronyms and spells out each letter.
-    // Title Case ensures it is naturally spoken as a whole word.
     clean = clean.replace(/\b([A-Z]{2,})\b/g, (match) => {
-      // Keep acronyms that should be pronounced as acronyms if any, but general words/names become Title Case
       if (match === 'AI' || match === 'UI' || match === 'ID' || match === 'OK') return match;
       return match.charAt(0).toUpperCase() + match.slice(1).toLowerCase();
     }).trim();
@@ -98,10 +109,8 @@ class SoundEngine {
     this.lastSpokenAt = now;
 
     window.speechSynthesis.cancel();
-    // Chrome/WebKit bug: speak() called in the same tick right after
-    // cancel() can clip or merge with whatever was still finishing.
-    // A tiny delay lets the cancel actually land before the new utterance starts.
     setTimeout(() => {
+      if (this.muted) return;
       const utterance = new SpeechSynthesisUtterance(clean);
       utterance.rate = 0.95;
       utterance.pitch = 1.05;
@@ -111,6 +120,7 @@ class SoundEngine {
 
   // Soft audio chime for successful voice command recognition (immediate non-visual confirmation)
   playVoiceAckChime() {
+    if (this.muted) return;
     try {
       const ctx = this.getContext();
       const osc = ctx.createOscillator();

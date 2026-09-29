@@ -237,13 +237,10 @@ export const AutoRotatingPoseCarousel: React.FC = () => {
               <div className="absolute inset-0 bg-gradient-to-t from-stone-950/90 via-stone-950/20 to-stone-950/60" />
 
               {/* Pose Title Overlay */}
-              <div className="absolute bottom-3 left-3.5 right-3.5 text-white z-20 flex justify-between items-end">
+              <div className="absolute bottom-3 left-3.5 right-3.5 text-white z-20 flex justify-between items-end pointer-events-none">
                 <div>
                   <p className="text-base font-bold text-white tracking-wide shadow-sm">{activePose.name}</p>
                   <p className="text-xs text-emerald-300 italic font-mono">{activePose.sanskritName}</p>
-                </div>
-                <div className="text-[10px] font-mono bg-stone-900/85 backdrop-blur-sm px-2.5 py-1 rounded-md border border-emerald-500/40 text-emerald-300 shadow-md">
-                  Single Person Tracking
                 </div>
               </div>
             </motion.div>
@@ -258,7 +255,7 @@ export const AutoRotatingPoseCarousel: React.FC = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -5 }}
             transition={{ duration: 0.3 }}
-            className="absolute top-3 left-3 z-30 bg-stone-950/90 border border-emerald-500/60 text-emerald-300 text-[11px] font-mono px-3 py-1.5 rounded-lg shadow-xl backdrop-blur-md flex items-center gap-1.5"
+            className="absolute top-3 left-3 z-10 bg-stone-950/90 border border-emerald-500/60 text-emerald-300 text-[11px] font-mono px-3 py-1.5 rounded-lg shadow-xl backdrop-blur-md flex items-center gap-1.5"
           >
             <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
             <span>{activePose.topTag}</span>
@@ -273,7 +270,7 @@ export const AutoRotatingPoseCarousel: React.FC = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 5 }}
             transition={{ duration: 0.3 }}
-            className="absolute bottom-3 right-3 z-30 bg-stone-950/90 border border-amber-500/60 text-amber-300 text-[11px] font-mono px-3 py-1.5 rounded-lg shadow-xl backdrop-blur-md flex items-center gap-1.5"
+            className="absolute bottom-3 right-3 z-10 bg-stone-950/90 border border-amber-500/60 text-amber-300 text-[11px] font-mono px-3 py-1.5 rounded-lg shadow-xl backdrop-blur-md flex items-center gap-1.5"
           >
             <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
             <span>{activePose.bottomTag}</span>

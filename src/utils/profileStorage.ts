@@ -7,13 +7,72 @@ import { apiGetMe, apiSaveSession, apiFetchSessions, getToken, apiUpdateProfile 
 const STORAGE_KEY_USER = 'asana_sense_user_profile_v2';
 const STORAGE_KEY_SESSIONS = 'asana_sense_sessions_v2';
 
+// ── Persistent Custom Display Name Registry ─────────────────────────────────
+
+const STORAGE_KEY_CUSTOM_NAMES = 'asana_user_custom_names_v1';
+
+export function getCustomNameRegistry(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_CUSTOM_NAMES);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setCustomDisplayName(email: string, name: string): void {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  const cleanName = (name || '').trim();
+  if (!cleanEmail || !cleanName) return;
+  try {
+    const reg = getCustomNameRegistry();
+    reg[cleanEmail] = cleanName;
+    localStorage.setItem(STORAGE_KEY_CUSTOM_NAMES, JSON.stringify(reg));
+  } catch (e) {
+    console.warn('[profileStorage] Failed to save custom display name:', e);
+  }
+}
+
+export function removeCustomDisplayName(email: string): void {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail) return;
+  try {
+    const reg = getCustomNameRegistry();
+    delete reg[cleanEmail];
+    localStorage.setItem(STORAGE_KEY_CUSTOM_NAMES, JSON.stringify(reg));
+  } catch {
+    // ignore
+  }
+}
+
+export function applyCustomDisplayName(user: UserProfile | null): UserProfile | null {
+  if (!user || !user.email) return user;
+  const cleanEmail = user.email.trim().toLowerCase();
+  const reg = getCustomNameRegistry();
+  const customName = reg[cleanEmail];
+  if (customName && customName.trim()) {
+    const trimmed = customName.trim();
+    const avatar = trimmed.slice(0, 2).toUpperCase();
+    return {
+      ...user,
+      name: trimmed,
+      display_name: trimmed,
+      full_name: trimmed,
+      avatarSeed: avatar,
+      avatar_seed: avatar,
+    };
+  }
+  return user;
+}
+
 // ── User Profile ─────────────────────────────────────────────────────────────
 
 export function getStoredUserProfile(): UserProfile | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_USER);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const user = JSON.parse(raw);
+    return applyCustomDisplayName(user);
   } catch {
     return null;
   }
@@ -21,7 +80,8 @@ export function getStoredUserProfile(): UserProfile | null {
 
 export function saveUserProfile(profile: UserProfile): void {
   try {
-    localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
+    const cleanProfile = applyCustomDisplayName(profile) || profile;
+    localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(cleanProfile));
   } catch (e) {
     console.error('Failed to save profile:', e);
   }
@@ -38,8 +98,9 @@ export async function fetchUserProfileFromAPI(): Promise<UserProfile | null> {
   try {
     const data = await apiGetMe();
     if (data.success && data.user) {
-      saveUserProfile(data.user); // sync to localStorage as cache
-      return data.user;
+      const mergedUser = applyCustomDisplayName(data.user) || data.user;
+      saveUserProfile(mergedUser); // sync to localStorage as cache
+      return mergedUser;
     }
   } catch (e) {
     console.warn('API profile fetch failed, using cached:', e);
@@ -51,14 +112,31 @@ export async function fetchUserProfileFromAPI(): Promise<UserProfile | null> {
  * Update profile on the API and sync to localStorage.
  */
 export async function updateProfileOnAPI(updates: Record<string, any>): Promise<UserProfile | null> {
+  const current = getStoredUserProfile();
+  const cleanEmail = (current?.email || '').trim().toLowerCase();
+
+  if (updates.name && cleanEmail) {
+    setCustomDisplayName(cleanEmail, updates.name.trim());
+  }
+
   try {
     const data = await apiUpdateProfile(updates);
     if (data.success && data.user) {
-      saveUserProfile(data.user);
-      return data.user;
+      if (updates.name && cleanEmail) {
+        setCustomDisplayName(cleanEmail, updates.name.trim());
+      }
+      const merged = applyCustomDisplayName(data.user) || data.user;
+      saveUserProfile(merged);
+      return merged;
     }
   } catch (e) {
     console.warn('API profile update failed:', e);
+  }
+
+  if (current) {
+    const updated = applyCustomDisplayName({ ...current, ...updates }) || current;
+    saveUserProfile(updated);
+    return updated;
   }
   return null;
 }
@@ -69,7 +147,22 @@ export function getStoredSessions(): PracticeSession[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_SESSIONS);
     if (!raw) return [];
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    
+    // Deduplicate sessions by unique id
+    const seen = new Set<string>();
+    const unique: PracticeSession[] = [];
+    for (const item of parsed) {
+      if (!item) continue;
+      const id = item.id || (item as any)._id || (item as any).start_time?.toString() || (item as any).startTime?.toString();
+      if (id) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      unique.push(item);
+    }
+    return unique;
   } catch {
     return [];
   }
@@ -107,9 +200,11 @@ export async function saveSessionRecord(session: PracticeSession): Promise<void>
     status: p.status || 'completed',
   }));
 
+  const sessionId = session.id || ('session_' + Date.now());
+
   const normalizedSession: PracticeSession = {
     ...session,
-    id: session.id || ('session_' + Date.now()),
+    id: sessionId,
     startTime,
     start_time: startTime,
     endTime,
@@ -126,9 +221,9 @@ export async function saveSessionRecord(session: PracticeSession): Promise<void>
     ai_report: session.aiReport || (session as any).ai_report || null,
   };
 
-  // Save to localStorage immediately
+  // Save to localStorage immediately with de-duplication
   try {
-    const current = getStoredSessions();
+    const current = getStoredSessions().filter((s) => (s.id || (s as any)._id) !== sessionId);
     current.unshift(normalizedSession);
     localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(current.slice(0, 30)));
   } catch (e) {
@@ -208,11 +303,70 @@ export async function fetchSessionsFromAPI(): Promise<PracticeSession[]> {
   return getStoredSessions();
 }
 
-// ── Logout ───────────────────────────────────────────────────────────────────
+/**
+ * Delete a session from localStorage and update user stats.
+ */
+export function deleteStoredSession(sessionId: string): PracticeSession[] {
+  try {
+    const current = getStoredSessions();
+    const updated = current.filter((s) => (s.id || (s as any)._id) !== sessionId);
+    localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(updated));
+
+    // Recalculate and update user stats
+    const user = getStoredUserProfile();
+    if (user) {
+      const totalSess = updated.length;
+      const totalDurationAll = updated.reduce((acc, s) => {
+        const sec = s.totalDurationSeconds ?? (s as any).total_duration_seconds ?? 0;
+        return acc + (isNaN(sec) ? 0 : sec);
+      }, 0);
+      const totalScoreAll = updated.reduce((acc, s) => {
+        const sc = s.overallAccuracy ?? (s as any).overall_accuracy ?? 0;
+        return acc + (isNaN(sc) ? 0 : sc);
+      }, 0);
+
+      const totalMins = Math.round(totalDurationAll / 60);
+      const avgScore = totalSess > 0 ? Math.round(totalScoreAll / totalSess) : 0;
+
+      user.stats = {
+        ...(user.stats || {}),
+        total_sessions: totalSess,
+        totalSessions: totalSess,
+        total_minutes_practiced: totalMins,
+        totalMinutesPracticed: totalMins,
+        average_score: avgScore,
+        averageScore: avgScore,
+      };
+      saveUserProfile(user);
+    }
+
+    return updated;
+  } catch (e) {
+    console.error('Failed to delete session:', e);
+    return getStoredSessions();
+  }
+}
+
+// ── Logout & Account Deletion ─────────────────────────────────────────────
 
 export function clearUserSessionData(): void {
   localStorage.removeItem(STORAGE_KEY_USER);
   localStorage.removeItem(STORAGE_KEY_SESSIONS);
+  localStorage.removeItem('asana_user_answers');
+}
+
+export async function permanentlyDeleteUserAccount(): Promise<boolean> {
+  try {
+    const { apiDeleteAccount } = await import('./apiClient');
+    await apiDeleteAccount();
+  } catch (err) {
+    console.warn('[Storage] Remote account deletion error:', err);
+  }
+  clearUserSessionData();
+  const { clearToken } = await import('./apiClient');
+  clearToken();
+  sessionStorage.clear();
+  return true;
 }
 
 // ── Pose Mastery Badges ──────────────────────────────────────────────────────
@@ -229,14 +383,30 @@ export interface PoseMasteryInfo {
 export function calculatePoseMasteryBadges(sessions: PracticeSession[]): Record<string, PoseMasteryInfo> {
   const counts: Record<string, { count: number; bestAccuracy: number }> = {};
 
+  if (!Array.isArray(sessions)) return {};
+
   sessions.forEach((sess) => {
-    sess.poses_recorded.forEach((pose) => {
-      if (!counts[pose.pose_id]) {
-        counts[pose.pose_id] = { count: 0, bestAccuracy: 0 };
-      }
-      counts[pose.pose_id].count += 1;
-      if (pose.accuracy_score > counts[pose.pose_id].bestAccuracy) {
-        counts[pose.pose_id].bestAccuracy = pose.accuracy_score;
+    if (!sess) return;
+    const poses = sess.posesRecorded || (sess as any).poses_recorded || [];
+    if (!Array.isArray(poses)) return;
+
+    poses.forEach((pose: any) => {
+      if (!pose) return;
+      const id = pose.poseId || pose.pose_id;
+      if (!id) return;
+
+      const acc = Number(pose.accuracyScore ?? pose.accuracy_score ?? 0);
+      const hold = Number(pose.bestHoldSeconds ?? pose.best_hold_seconds ?? pose.durationSeconds ?? pose.duration_seconds ?? 0);
+
+      // Only count if practitioner actually held the pose for at least 3 seconds with valid alignment
+      if (hold >= 3 && acc > 0) {
+        if (!counts[id]) {
+          counts[id] = { count: 0, bestAccuracy: 0 };
+        }
+        counts[id].count += 1;
+        if (acc > counts[id].bestAccuracy) {
+          counts[id].bestAccuracy = acc;
+        }
       }
     });
   });
@@ -276,3 +446,4 @@ export function calculatePoseMasteryBadges(sessions: PracticeSession[]): Record<
 
   return result;
 }
+

@@ -142,6 +142,8 @@ export interface UserProfile {
   id: string;
   name: string;
   email: string;
+  display_name?: string;
+  full_name?: string;
   isAccountActive?: boolean;
   is_account_active?: boolean;
   avatarSeed?: string;
@@ -150,6 +152,7 @@ export interface UserProfile {
   member_since?: string;
   hasCompletedOnboarding?: boolean;
   has_completed_onboarding?: boolean;
+  is_verified?: boolean;
   ageCategory?: string;
   age_category?: string;
   experienceLevel?: string;

@@ -42,7 +42,7 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
   const activePose = ALL_POSES[activeIndex];
 
   return (
-    <section id="pose-carousel-showcase" className="relative py-16 px-6 sm:px-10 lg:px-14 max-w-[1720px] w-full mx-auto overflow-hidden">
+    <section id="pose-carousel-showcase" className="relative py-12 sm:py-16 px-3.5 sm:px-8 lg:px-14 max-w-[1720px] w-full mx-auto overflow-hidden">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
         <div>
