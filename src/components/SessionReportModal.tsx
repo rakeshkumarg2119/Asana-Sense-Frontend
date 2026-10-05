@@ -41,6 +41,7 @@ import { PracticeSession, UserProfile } from '../types';
 import { ALL_POSES } from '../data/yogaPoses';
 import { getStoredSessions } from '../utils/profileStorage';
 import { apiGenerateSessionReport, apiSendSessionEmail, getToken } from '../utils/apiClient';
+import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 
 // ── Defensive sanitizers ─────────────────────────────────────────────────────
 // AI / heuristic engines sometimes return objects ({ title, description }) or nested arrays where the
@@ -243,6 +244,12 @@ export const SessionReportModal: React.FC<SessionReportModalProps> = ({
 }) => {
   const exitingRef = useRef(false);
   const [showCloseConfirmation, setShowCloseConfirmation] = useState(false);
+
+  // Focus trapping and Escape key management
+  const containerRef = useModalFocusTrap({
+    isOpen: !!session,
+    onClose: isHistoryView ? onClose : () => setShowCloseConfirmation(true),
+  });
 
   // Every way of leaving the report (X, footer, backdrop, Escape, Exit to Dashboard) funnels here
   const handleExit = useCallback(() => {
@@ -722,16 +729,53 @@ Generated securely by ASANA - SENSE AI Vision Studio
     setTimeout(() => setCopiedSummary(false), 2500);
   };
 
-  // Trigger Native Mail Client with Pre-populated Subject & Summary Body
-  const handleTriggerMailTo = () => {
-    const subject = encodeURIComponent(`ASANA - SENSE Session Report - ${overallAccuracy}% Accuracy`);
-    const body = encodeURIComponent(generateReportText());
-    const emailTarget = userProfile?.email || '';
-    window.open(`mailto:${emailTarget}?subject=${subject}&body=${body}`, '_blank');
+  // Automated SMTP Backend Email Dispatcher
+  const [emailStatus, setEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [emailStatusMsg, setEmailStatusMsg] = useState<string>('');
+
+  const handleSendBackendEmail = async () => {
+    if (recordedPoses.length === 0) {
+      setEmailStatus('error');
+      setEmailStatusMsg('No poses were recorded in this session. Email cannot be sent.');
+      setTimeout(() => setEmailStatus('idle'), 5000);
+      return;
+    }
+
+    const targetEmail = userProfile?.email;
+    if (!targetEmail) {
+      setEmailStatus('error');
+      setEmailStatusMsg('Please sign in or update your profile email to receive reports.');
+      setTimeout(() => setEmailStatus('idle'), 4000);
+      return;
+    }
+
+    setEmailStatus('sending');
+    setEmailStatusMsg('');
+    try {
+      const res = await apiSendSessionEmail({
+        sessionData: session,
+        aiReport: aiReport,
+        to_email: targetEmail,
+      });
+
+      if (res?.success) {
+        setEmailStatus('sent');
+        setEmailStatusMsg(`Report emailed to ${targetEmail}`);
+        setTimeout(() => setEmailStatus('idle'), 5000);
+      } else {
+        setEmailStatus('error');
+        setEmailStatusMsg(res?.message || 'FastAPI backend mail service error.');
+        setTimeout(() => setEmailStatus('idle'), 5000);
+      }
+    } catch (err: any) {
+      console.warn('[SessionReportModal] Mail dispatch failed:', err);
+      setEmailStatus('error');
+      setEmailStatusMsg(err?.message || 'Unable to connect to email service.');
+      setTimeout(() => setEmailStatus('idle'), 5000);
+    }
   };
 
-  const providerBadge = view.provider;
-  const usedGroq = /groq/i.test(view.provider);
+  const providerBadge = view.provider || 'Veda AI Biomechanics Engine';
 
   return (
     <div 
@@ -746,17 +790,22 @@ Generated securely by ASANA - SENSE AI Vision Studio
         }
       }}
       className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-5 bg-stone-950/80 backdrop-blur-md"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="session-report-title"
     >
       <motion.div
+        ref={containerRef}
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        className="bg-white rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col p-5 sm:p-7 shadow-2xl border border-stone-200 relative overflow-hidden"
+        tabIndex={-1}
+        className="bg-white rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col p-5 sm:p-7 shadow-2xl border border-stone-200 relative overflow-hidden focus:outline-hidden"
       >
         {/* Sticky Header with Title, Email Status & Close Button */}
         <div className="flex items-center justify-between pb-4 border-b border-stone-100 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 shadow-xs">
+            <div className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 shadow-xs" aria-hidden="true">
               <Award className="w-6 h-6" />
             </div>
             <div>
@@ -765,11 +814,11 @@ Generated securely by ASANA - SENSE AI Vision Studio
                   Practice Certified
                 </span>
                 <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[10px] font-semibold border border-emerald-200 flex items-center gap-1">
-                  <Zap className="w-3 h-3 text-emerald-600" />
+                  <Zap className="w-3 h-3 text-emerald-600" aria-hidden="true" />
                   {providerBadge}
                 </span>
               </div>
-              <h2 className="text-xl sm:text-2xl font-serif font-bold text-stone-900 leading-tight">
+              <h2 id="session-report-title" className="text-xl sm:text-2xl font-serif font-bold text-stone-900 leading-tight">
                 Yoga Biomechanics Master Report
               </h2>
             </div>
@@ -785,9 +834,9 @@ Generated securely by ASANA - SENSE AI Vision Studio
               }
             }}
             aria-label="Close Report"
-            className="w-9 h-9 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition flex items-center justify-center cursor-pointer shrink-0"
+            className="w-9 h-9 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition flex items-center justify-center cursor-pointer shrink-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -1276,7 +1325,7 @@ Generated securely by ASANA - SENSE AI Vision Studio
           )}
         </div>
 
-        {/* Footer Actions (Download PDF Report / Copy / Restart / Exit) */}
+        {/* Footer Actions (Download PDF Report / Send Email / Copy / Restart / Exit) */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-stone-100 shrink-0">
           <div className="flex items-center gap-2 flex-wrap">
             <button
@@ -1289,6 +1338,37 @@ Generated securely by ASANA - SENSE AI Vision Studio
               Download PDF Report
             </button>
 
+            <button
+              id="send-email-report-btn"
+              type="button"
+              disabled={emailStatus === 'sending'}
+              onClick={handleSendBackendEmail}
+              className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
+                emailStatus === 'sent'
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                  : emailStatus === 'error'
+                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+              }`}
+              title={userProfile?.email ? `Send report to ${userProfile.email}` : 'Send to your email'}
+            >
+              {emailStatus === 'sending' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+              ) : emailStatus === 'sent' ? (
+                <Check className="w-3.5 h-3.5 text-emerald-600" />
+              ) : (
+                <Mail className="w-3.5 h-3.5 text-emerald-600" />
+              )}
+              <span>
+                {emailStatus === 'sending'
+                  ? 'Sending Mail...'
+                  : emailStatus === 'sent'
+                  ? 'Email Sent!'
+                  : emailStatus === 'error'
+                  ? 'Retry Email'
+                  : 'Email Report'}
+              </span>
+            </button>
 
             <button
               onClick={handleCopySummary}
@@ -1297,6 +1377,14 @@ Generated securely by ASANA - SENSE AI Vision Studio
               {copiedSummary ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
               {copiedSummary ? 'Copied Text' : 'Copy Text'}
             </button>
+
+            {emailStatusMsg && (
+              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-md ${
+                emailStatus === 'sent' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+              }`}>
+                {emailStatusMsg}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2.5">

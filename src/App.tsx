@@ -27,9 +27,11 @@ import { WelcomeToast } from './components/WelcomeToast';
 import { Info, X, WifiOff, Server, AlertTriangle, RefreshCw, Settings as SettingsIcon, Sparkles, Mail, CheckCircle2 } from 'lucide-react';
 import type { UserProfile, YogaPose, PracticeSession } from './types';
 import { getStoredUserProfile, saveUserProfile, saveSessionRecord, fetchUserProfileFromAPI } from './utils/profileStorage';
-import { getToken, apiLogout, apiHealthCheck, getBackendUrl } from './utils/apiClient';
+import { getToken, apiLogout, apiHealthCheck, getBackendUrl, apiSendSessionEmail } from './utils/apiClient';
 import { fetchPosesFromAPI, ALL_POSES } from './data/yogaPoses';
 import { soundEngine } from './utils/audioFeedback';
+import { isMobileDevice } from './utils/deviceDetection';
+import { MobileDesktopNoticeModal } from './components/MobileDesktopNoticeModal';
 
 export default function App() {
   // 404 Route state
@@ -121,6 +123,8 @@ export default function App() {
   const [backendSettingsOpen, setBackendSettingsOpen] = useState(false);
   const [inspectingPose, setInspectingPose] = useState<YogaPose | null>(null);
   const [completedSession, setCompletedSession] = useState<PracticeSession | null>(null);
+  const [mobileNoticeModalOpen, setMobileNoticeModalOpen] = useState(false);
+  const [mobileNoticePoseName, setMobileNoticePoseName] = useState<string | undefined>(undefined);
 
   // Check URL query parameters for direct password reset link (?mode=reset-password&token=...&email=...)
   useEffect(() => {
@@ -216,6 +220,14 @@ export default function App() {
 
   // Central Session Trigger: performs pre-flight FastAPI health check before entering live session
   const handleInitiateSession = async (poseId?: string) => {
+    // Intercept Mobile Devices: Play spoken voice advisory and show desktop recommendation modal
+    if (isMobileDevice()) {
+      const targetPose = poseId ? poses.find((p) => p.id === poseId) : undefined;
+      setMobileNoticePoseName(targetPose?.name);
+      setMobileNoticeModalOpen(true);
+      return;
+    }
+
     if (!userProfile) {
       setPendingPoseId(poseId);
       setPendingStartSession(true);
@@ -309,13 +321,20 @@ export default function App() {
       setPendingStartSession(false);
       const poseToUse = pendingPoseId;
       setPendingPoseId(undefined);
-      setSessionInitialPoseId(poseToUse);
-      setInspectingPose(null);
-      sessionStorage.setItem('asana_entered_session', 'true');
-      setIsInitialSignInAnimation(false);
-      triggerViewTransition('live-session', 'Preparing Live Studio...', () => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
+
+      if (isMobileDevice()) {
+        const targetPose = poseToUse ? poses.find((p) => p.id === poseToUse) : undefined;
+        setMobileNoticePoseName(targetPose?.name);
+        setMobileNoticeModalOpen(true);
+      } else {
+        setSessionInitialPoseId(poseToUse);
+        setInspectingPose(null);
+        sessionStorage.setItem('asana_entered_session', 'true');
+        setIsInitialSignInAnimation(false);
+        triggerViewTransition('live-session', 'Preparing Live Studio...', () => {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      }
     } else if (isNewSignUp && !profile.has_completed_onboarding && !profile.hasCompletedOnboarding) {
       setOnboardingModalOpen(true);
     }
@@ -333,25 +352,34 @@ export default function App() {
     setPendingPoseId(undefined);
 
     if (shouldStart) {
-      setSessionInitialPoseId(poseToUse);
-      setInspectingPose(null);
-      sessionStorage.setItem('asana_entered_session', 'true');
-      setIsInitialSignInAnimation(false);
-      triggerViewTransition('live-session', 'Setting up personalized session...', () => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
+      if (isMobileDevice()) {
+        const targetPose = poseToUse ? poses.find((p) => p.id === poseToUse) : undefined;
+        setMobileNoticePoseName(targetPose?.name);
+        setMobileNoticeModalOpen(true);
+      } else {
+        setSessionInitialPoseId(poseToUse);
+        setInspectingPose(null);
+        sessionStorage.setItem('asana_entered_session', 'true');
+        setIsInitialSignInAnimation(false);
+        triggerViewTransition('live-session', 'Setting up personalized session...', () => {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      }
     }
   };
 
   // On Session finished: synthesize report and open as in-session overlay directly over the active session
   const handleSessionFinished = (session: PracticeSession) => {
-    // If session has no recorded poses or holds, do not synthesize report!
-    const validPoses = (session.posesRecorded || (session as any).poses_recorded || []).filter(
-      (p: any) => (Number(p.durationSeconds || p.duration_seconds || 0) >= 3 || Number(p.bestHoldSeconds || p.best_hold_seconds || 0) >= 3)
+    const rawPoses = session.posesRecorded || (session as any).poses_recorded || [];
+    const validPoses = rawPoses.filter(
+      (p: any) => (p.durationSeconds || p.duration_seconds || p.bestHoldSeconds || p.best_hold_seconds || 0) > 0
     );
-    if (validPoses.length === 0) {
+
+    // If no poses were recorded/practiced: DO NOT send email, DO NOT generate report, display toast notice
+    if (rawPoses.length === 0 || validPoses.length === 0) {
       handleExitSession();
-      setEmptySessionNotice('Session ended. No poses were held during this session, so no report was generated.');
+      setEmptySessionNotice('Session ended with no poses recorded. No report was generated and no email was sent.');
+      setTimeout(() => setEmptySessionNotice(null), 6000);
       return;
     }
 
@@ -366,12 +394,23 @@ export default function App() {
         sessionStorage.setItem('asana_generated_report', 'true');
         window.scrollTo({ top: 0 });
 
-        // Persist + refresh stats in the background so a slow/failed network never blocks the report
+        // Persist + refresh stats + dispatch email in the background so network latency never blocks report display
         void (async () => {
           try {
             await saveSessionRecord(session);
           } catch (err) {
             console.warn('[App] Failed to save session record:', err);
+          }
+          if (userProfile?.email) {
+            try {
+              await apiSendSessionEmail({
+                sessionData: session,
+                to_email: userProfile.email,
+              });
+              console.log('[App] Session report email dispatched to:', userProfile.email);
+            } catch (emailErr) {
+              console.warn('[App] Background email dispatch notice:', emailErr);
+            }
           }
           try {
             const updated = await fetchUserProfileFromAPI();
@@ -492,7 +531,8 @@ export default function App() {
             onOpenSettings={() => setBackendSettingsOpen(true)}
             onNoPosesPracticed={() => {
               handleExitSession();
-              setEmptySessionNotice('Session ended. No poses were held during this session, so no report was generated.');
+              setEmptySessionNotice('Session ended with no poses recorded. No report was generated and no email was sent.');
+              setTimeout(() => setEmptySessionNotice(null), 6000);
             }}
           />
         </ErrorBoundary>
@@ -681,18 +721,11 @@ export default function App() {
                 Connection Required
               </span>
               <h3 className="text-xl font-serif font-bold text-stone-900">
-                FastAPI Server is Offline
+                Server Unavailable
               </h3>
-              <p className="text-xs text-stone-600 leading-relaxed">
-                The live posture studio requires your running <strong>FastAPI Python backend</strong> ({getBackendUrl()}) for biomechanical angle calculations and pose classification.
+              <p className="text-xs text-stone-600 leading-relaxed font-medium">
+                Server is temporarily unavailable. We'll be back soon!
               </p>
-            </div>
-
-            <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200 text-left font-mono text-[11px] space-y-1 text-stone-700">
-              <div className="text-[10px] font-bold text-stone-400 uppercase tracking-wider font-sans">Start Server Command:</div>
-              <div className="text-emerald-700 font-bold bg-white p-2 rounded-xl border border-stone-200 truncate">
-                uvicorn main:app --host 0.0.0.0 --port 8000
-              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2.5 pt-1">
@@ -737,6 +770,13 @@ export default function App() {
           onClose={() => setWelcomeToast(null)}
         />
       )}
+
+      {/* Mobile Device Advisory Modal with Voice Guidance */}
+      <MobileDesktopNoticeModal
+        isOpen={mobileNoticeModalOpen}
+        onClose={() => setMobileNoticeModalOpen(false)}
+        targetPoseName={mobileNoticePoseName}
+      />
     </div>
   );
 }

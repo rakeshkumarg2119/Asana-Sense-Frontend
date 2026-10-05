@@ -30,6 +30,8 @@ import {
 } from '../utils/profileStorage';
 import { updateProfileOnAPI } from '../utils/apiClient';
 import { ALL_POSES } from '../data/yogaPoses';
+import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
+import { ProgressTrendsChart } from './ProgressTrendsChart';
 
 interface UserProfileModalProps {
   user: UserProfile;
@@ -50,6 +52,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onOpenOnboarding,
   onUpdateUser,
 }) => {
+  const containerRef = useModalFocusTrap({ isOpen, onClose });
   const [pastSessions, setPastSessions] = useState<PracticeSession[]>([]);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   
@@ -228,20 +231,26 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         }
       }}
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-stone-950/80 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="user-profile-modal-title"
     >
       <motion.div
+        ref={containerRef}
+        tabIndex={-1}
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        className="bg-white rounded-3xl max-w-lg w-full max-h-[88vh] flex flex-col p-5 sm:p-6 shadow-2xl border border-stone-200 relative overflow-hidden"
+        className="bg-white rounded-3xl max-w-lg w-full max-h-[88vh] flex flex-col p-5 sm:p-6 shadow-2xl border border-stone-200 relative overflow-hidden focus:outline-hidden"
       >
         {/* Close Button */}
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 w-8 h-8 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition flex items-center justify-center cursor-pointer z-10"
-          title="Close Profile"
+          aria-label="Close user profile modal"
+          className="absolute top-4 right-4 w-8 h-8 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition flex items-center justify-center cursor-pointer z-10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
         >
-          <X className="w-4 h-4" />
+          <X className="w-4 h-4" aria-hidden="true" />
         </button>
 
         {/* Profile Card Header */}
@@ -341,6 +350,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <span className="text-lg font-bold text-teal-700">{avgScore > 0 ? `${avgScore}%` : '0%'}</span>
             </div>
           </div>
+
+          {/* 30-DAY PROGRESS TRENDS CHART (RECHARTS DUAL-AXIS COMBO) */}
+          <ProgressTrendsChart 
+            sessions={pastSessions} 
+            userExperience={user?.experienceLevel || user?.experience_level} 
+          />
 
           {/* POSE MASTERY BADGES */}
           <div className="bg-gradient-to-br from-amber-50/60 via-stone-50 to-emerald-50/40 rounded-2xl p-3.5 border border-amber-200/60">

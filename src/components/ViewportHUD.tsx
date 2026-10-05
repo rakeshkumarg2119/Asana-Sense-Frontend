@@ -105,7 +105,7 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
                 onClick={onCloseVoiceTable}
                 className="w-5 h-5 rounded-full bg-stone-800 hover:bg-stone-700 flex items-center justify-center text-stone-400 hover:text-white transition cursor-pointer"
               >
-                <X className="w-3 h-3" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
 
@@ -403,8 +403,16 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
           </div>
         )}
 
-        {/* Bottom Row: AI Master Coach Correction Guidance Banner */}
+        {/* Bottom Row: Plain green text Veda AI above message box aligned to the right */}
         <div className="space-y-1.5 pointer-events-auto">
+          {/* Plain green text Veda AI aligned to the right side */}
+          <div className="flex justify-end pr-1">
+            <span className="text-emerald-400 text-xs font-bold uppercase tracking-wider select-none">
+              Veda AI
+            </span>
+          </div>
+
+          {/* AI Guidance Message Box */}
           <motion.div 
             key={postureAnalysis.keyCues[0] || 'guide'}
             initial={{ opacity: 0, y: 10 }}
@@ -414,16 +422,16 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-emerald-400 animate-spin" />
-                  {aiCoachName} Guidance • {postureAnalysis.alignmentStatus}
+                  <Sparkles className="w-3 h-3 text-emerald-400" />
+                  Posture Alignment Status • {postureAnalysis.alignmentStatus}
                 </span>
               </div>
-              <p className="text-xs text-stone-100 font-medium truncate leading-snug">
+              <p className="text-xs text-stone-100 font-medium line-clamp-2 leading-snug">
                 👉 {postureAnalysis.keyCues[0] || 'Select an asana and click Ready when in position.'}
               </p>
             </div>
 
-            {/* Badges container: side-by-side with vertical centering */}
+            {/* Badges container: side-by-side in original place */}
             <div className="shrink-0 flex items-center gap-2">
               {lastVoiceCommand && (
                 <span className="text-[10px] px-2.5 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/40 font-semibold flex items-center justify-center whitespace-nowrap">

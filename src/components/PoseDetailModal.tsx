@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, ShieldAlert, CheckCircle2, Flame, Activity, ArrowRight, BookOpen, AlertTriangle } from 'lucide-react';
 import { YogaPose } from '../types';
 import { PoseVisualArtwork } from './PoseVisualArtwork';
+import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 
 interface PoseDetailModalProps {
   pose: YogaPose;
@@ -15,17 +16,8 @@ export const PoseDetailModal: React.FC<PoseDetailModalProps> = ({
   onClose,
   onStartPractice,
 }) => {
+  const containerRef = useModalFocusTrap({ isOpen: !!pose, onClose });
   const [activeTab, setActiveTab] = useState<'biomechanics' | 'benefits' | 'cues'>('biomechanics');
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
 
   return (
     <div 
@@ -36,22 +28,27 @@ export const PoseDetailModal: React.FC<PoseDetailModalProps> = ({
         }
       }}
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-stone-950/80 backdrop-blur-sm overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pose-detail-title"
     >
       <motion.div
+        ref={containerRef}
         initial={{ opacity: 0, scale: 0.96, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 12 }}
-        className="bg-white rounded-2xl max-w-xl w-full max-h-[88vh] shadow-2xl border border-stone-200 relative flex flex-col overflow-hidden"
+        tabIndex={-1}
+        className="bg-white rounded-2xl max-w-xl w-full max-h-[88vh] shadow-2xl border border-stone-200 relative flex flex-col overflow-hidden focus:outline-hidden"
       >
         {/* Sticky Header with Title and Close Button */}
         <div className="px-5 py-3.5 bg-stone-50 border-b border-stone-200 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center" aria-hidden="true">
               <BookOpen className="w-4 h-4 text-emerald-700" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-stone-900 leading-tight">{pose.name}</h2>
+                <h2 id="pose-detail-title" className="text-base font-bold text-stone-900 leading-tight">{pose.name}</h2>
                 <span className="text-xs text-emerald-700 font-serif italic font-medium">({pose.sanskritName})</span>
               </div>
               <p className="text-[11px] text-stone-500 flex items-center gap-2">
@@ -64,49 +61,59 @@ export const PoseDetailModal: React.FC<PoseDetailModalProps> = ({
 
           <button
             id="close-pose-detail-modal-btn"
+            type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-stone-200/70 hover:bg-stone-300 text-stone-600 hover:text-stone-900 transition flex items-center justify-center cursor-pointer"
-            title="Close"
+            aria-label="Close pose details modal"
+            className="w-8 h-8 rounded-lg bg-stone-200/70 hover:bg-stone-300 text-stone-600 hover:text-stone-900 transition flex items-center justify-center cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
 
         {/* Navigation Tabs for Compact Visibility */}
-        <div className="px-5 pt-3 pb-2 bg-stone-100/60 border-b border-stone-200 flex items-center gap-1.5 shrink-0">
+        <div className="px-5 pt-3 pb-2 bg-stone-100/60 border-b border-stone-200 flex items-center gap-1.5 shrink-0" role="tablist" aria-label="Pose Details Tabs">
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'biomechanics'}
             onClick={() => setActiveTab('biomechanics')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
               activeTab === 'biomechanics'
                 ? 'bg-amber-600 text-white shadow-xs'
                 : 'text-stone-600 hover:bg-stone-200'
             }`}
           >
-            <ShieldAlert className="w-3.5 h-3.5" />
+            <ShieldAlert className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Biomechanics & Contraindications</span>
           </button>
 
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'benefits'}
             onClick={() => setActiveTab('benefits')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
               activeTab === 'benefits'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'text-stone-600 hover:bg-stone-200'
             }`}
           >
-            <Flame className="w-3.5 h-3.5" />
+            <Flame className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Target Benefits</span>
           </button>
 
           <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'cues'}
             onClick={() => setActiveTab('cues')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
               activeTab === 'cues'
                 ? 'bg-stone-800 text-white shadow-xs'
                 : 'text-stone-600 hover:bg-stone-200'
             }`}
           >
-            <CheckCircle2 className="w-3.5 h-3.5" />
+            <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Checkpoints</span>
           </button>
         </div>
@@ -205,18 +212,20 @@ export const PoseDetailModal: React.FC<PoseDetailModalProps> = ({
         {/* Footer Actions */}
         <div className="px-5 py-3 bg-stone-50 border-t border-stone-200 flex items-center justify-between shrink-0">
           <button
+            type="button"
             onClick={onClose}
-            className="px-3.5 py-1.5 rounded-lg bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-xs font-semibold cursor-pointer"
+            className="px-3.5 py-1.5 rounded-lg bg-stone-200/80 hover:bg-stone-300 text-stone-700 text-xs font-semibold cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
           >
             Close
           </button>
           <button
+            type="button"
             onClick={() => onStartPractice(pose)}
-            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
           >
-            <Activity className="w-3.5 h-3.5" />
+            <Activity className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Practice Pose Live</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
           </button>
         </div>
       </motion.div>

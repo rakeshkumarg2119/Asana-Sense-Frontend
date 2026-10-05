@@ -28,6 +28,7 @@ import {
   checkBackendConnection 
 } from '../utils/apiClient';
 import { AsanaSenseLogo } from './AsanaSenseLogo';
+import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -44,6 +45,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   initialMode = 'signup',
   onOpenResetPasswordModal,
 }) => {
+  const containerRef = useModalFocusTrap({ isOpen, onClose });
   const [mode, setMode] = useState<'signin' | 'signup_form' | 'signup_otp' | 'forgot_password' | 'forgot_password_success'>(
     initialMode === 'signin' ? 'signin' : 'signup_form'
   );
@@ -417,9 +419,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           onClick={(e) => {
             if (e.target === e.currentTarget) onClose();
           }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="auth-modal-title"
         >
           <motion.div
-            className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-stone-200 relative my-auto overflow-hidden text-stone-900"
+            ref={containerRef}
+            tabIndex={-1}
+            className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-stone-200 relative my-auto overflow-hidden text-stone-900 focus:outline-hidden"
             initial={{ opacity: 0, y: 15, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 15, scale: 0.96 }}
@@ -431,10 +438,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               id="close-auth-modal-btn"
               type="button"
               onClick={onClose}
-              aria-label="Close modal"
-              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-stone-100 hover:bg-stone-200 active:bg-stone-300 text-stone-600 hover:text-stone-900 transition flex items-center justify-center cursor-pointer border border-stone-200/80 shadow-2xs z-10"
+              aria-label="Close authentication modal"
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-stone-100 hover:bg-stone-200 active:bg-stone-300 text-stone-600 hover:text-stone-900 transition flex items-center justify-center cursor-pointer border border-stone-200/80 shadow-2xs z-10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
             >
-              <X className="w-4 h-4" />
+              <X className="w-4 h-4" aria-hidden="true" />
             </button>
 
             {/* Modal Header Branding */}
@@ -442,7 +449,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="flex justify-center mb-2">
                 <AsanaSenseLogo size="md" />
               </div>
-              <h3 className="text-lg font-serif font-bold text-stone-900">
+              <h3 id="auth-modal-title" className="text-lg font-serif font-bold text-stone-900">
                 {mode === 'signup_otp'
                   ? 'Verify Your Email'
                   : mode === 'signup_form'
@@ -472,9 +479,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <div className="font-bold text-amber-950">Server is currently offline / unreachable</div>
+                    <div className="font-bold text-amber-950">Server Unavailable</div>
                     <p className="text-[11px] text-amber-800 leading-relaxed mt-0.5">
-                      Please start your Python FastAPI backend. Once fixed, see you soon!
+                      Server is temporarily unavailable. We'll be back soon!
                     </p>
                   </div>
                 </div>

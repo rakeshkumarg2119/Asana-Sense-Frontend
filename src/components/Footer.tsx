@@ -63,7 +63,7 @@ export const Footer: React.FC<FooterProps> = ({
             {onOpenSettings && (
               <li>
                 <button onClick={onOpenSettings} className="hover:text-emerald-400 transition cursor-pointer flex items-center gap-1.5 text-stone-300">
-                  <Settings className="w-3.5 h-3.5 text-emerald-400" /> Python Backend Settings
+                  <Settings className="w-3.5 h-3.5 text-emerald-400" /> Settings
                 </button>
               </li>
             )}

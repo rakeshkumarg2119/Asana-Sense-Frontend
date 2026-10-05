@@ -34,23 +34,28 @@ export interface YogaPose {
 
 // ── Joint-Level Pose Detection (from WebSocket) ─────────────────────────────
 
-export interface JointStatus {
+export type JointStatus = 'correct' | 'warning' | 'critical';
+export type TimerAction = 'start' | 'continue' | 'stop' | 'idle';
+
+export interface Joint {
   index: number;
   name: string;
-  status: 'correct' | 'warning' | 'misaligned' | 'critical';
+  status: JointStatus;
   deviation: number;
 }
 
 export interface PoseDetectionResult {
-  type: 'pose_result';
   predicted_pose: string;
   confidence: number;
   target_pose: string;
   is_correct: boolean;
-  has_red?: boolean;
-  has_yellow?: boolean;
-  joints: JointStatus[];
-  timer_action: 'start' | 'stop' | 'continue' | 'idle';
+  has_red: boolean;
+  has_yellow: boolean;
+  joints: Joint[];
+  pose_mismatch: boolean;
+  pose_detected: boolean;
+  reference_available: boolean;
+  timer_action: TimerAction;
   correction_message: string;
 }
 

@@ -4,6 +4,8 @@ import { Volume2, VolumeX, Music, Upload, Play, Pause, Disc3, Plus, Trash2, X } 
 interface AmbientAudioPlayerProps {
   className?: string;
   defaultOpen?: boolean;
+  iconOnly?: boolean;
+  dropdownDirection?: 'up' | 'down';
 }
 
 export interface CustomTrack {
@@ -17,6 +19,8 @@ const STORAGE_CUSTOM_TRACKS = 'asana_custom_soundscapes_v1';
 
 export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
   className = '',
+  iconOnly = false,
+  dropdownDirection = 'down',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -190,17 +194,23 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
         id="ambient-music-toggle-btn"
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none ${
+        className={`${
+          iconOnly 
+            ? 'p-2 sm:px-2.5 sm:py-2' 
+            : 'px-2.5 py-1.5'
+        } rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none ${
           isPlaying
             ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/80 ring-2 ring-emerald-500/30'
-            : 'bg-stone-800/90 text-stone-300 border-stone-700 hover:bg-stone-700 hover:text-white'
+            : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700 hover:text-white'
         }`}
-        title="Ambient Meditation Music Player"
+        title={isPlaying ? 'Ambient Music: Playing (Click for controls)' : 'Ambient Soundscapes (Click to open)'}
       >
         <Music className={`w-3.5 h-3.5 ${isPlaying ? 'text-emerald-400 animate-spin' : 'text-stone-400'}`} style={{ animationDuration: '8s' }} />
-        <span className="hidden sm:inline font-medium">
-          {isPlaying ? 'Ambient Music: ON' : 'Ambient Music'}
-        </span>
+        {!iconOnly && (
+          <span className="hidden sm:inline font-medium">
+            {isPlaying ? 'Ambient Music: ON' : 'Ambient Music'}
+          </span>
+        )}
         {isPlaying && (
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
         )}
@@ -208,7 +218,11 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
 
       {/* Floating Ambient Music Control Panel */}
       {isOpen && (
-        <div className="absolute top-full right-0 mt-2 w-72 sm:w-84 bg-stone-900/95 border border-emerald-500/40 rounded-2xl shadow-2xl p-4 z-50 backdrop-blur-xl text-stone-100 space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+        <div className={`absolute ${
+          dropdownDirection === 'up' 
+            ? 'bottom-full right-0 mb-2' 
+            : 'top-full right-0 mt-2'
+        } w-72 sm:w-84 bg-stone-900/95 border border-emerald-500/40 rounded-2xl shadow-2xl p-4 z-50 backdrop-blur-xl text-stone-100 space-y-3.5 animate-in fade-in zoom-in-95 duration-150`}>
           {/* Header */}
           <div className="flex items-center justify-between border-b border-stone-800 pb-2">
             <div className="flex items-center gap-2">

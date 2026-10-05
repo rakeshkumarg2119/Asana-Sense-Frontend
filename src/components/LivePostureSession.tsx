@@ -29,6 +29,7 @@ import {
   FileText,
   Info,
   ChevronDown,
+  ChevronUp,
   Sun,
   Sunrise,
   Sunset,
@@ -148,16 +149,25 @@ function formatSpokenName(rawName?: string | null): string {
   return firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
 }
 
+function normalizePose(s?: string | null): string {
+  if (!s) return '';
+  return s.toLowerCase().trim().replace(/[-_\s]/g, '');
+}
+
 function isPoseMatch(predicted?: string | null, target?: string | null): boolean {
   if (!predicted || !target) return false;
-  if (predicted === target) return true;
-  const map: Record<string, string> = {
-    shoulder_stand: 'shoudler_stand',
-    shoudler_stand: 'shoulder_stand',
-    triangle: 'traingle',
-    traingle: 'triangle',
-  };
-  return map[predicted] === target || map[target] === predicted;
+  const p = normalizePose(predicted);
+  const t = normalizePose(target);
+  if (p === t) return true;
+  if (p.includes(t) || t.includes(p)) return true;
+  if ((p === 'traingle' || p === 'triangle') && (t === 'traingle' || t === 'triangle')) return true;
+  if (p.includes('tree') && t.includes('tree')) return true;
+  if (p.includes('chair') && t.includes('chair')) return true;
+  if (p.includes('dog') && t.includes('dog')) return true;
+  if (p.includes('warrior') && t.includes('warrior')) return true;
+  if ((p.includes('shoulder') || p.includes('shoudler')) && (t.includes('shoulder') || t.includes('shoudler'))) return true;
+  if (p.includes('cobra') && t.includes('cobra')) return true;
+  return false;
 }
 
 export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
@@ -255,8 +265,10 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Movable Voice Commands Reference Table State
+  // Docked Voice Commands Reference Table State
   const [showVoiceCmdTable, setShowVoiceCmdTable] = useState(false);
+  const [isVoiceTableMinimized, setIsVoiceTableMinimized] = useState(false);
+  const [showSplitAdjustMenu, setShowSplitAdjustMenu] = useState(false);
   const isDraggingTabRef = useRef(false);
 
   // Session Timers & Hold (Timer only ticks when isPoseActive is true; open-ended session duration)
@@ -300,56 +312,86 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     videoRef,
     canvasRef,
     targetPose: currentPose?.model_class_name || null,
-    isActive: isPoseActive && cameraActive,
+    isActive: cameraActive,
     voiceEnabled: voiceSpeechEnabled,
     onPoseResult: (result) => {
       setModelPoseResult(result);
 
-      const hasCriticalJoint = Boolean(
-        result.has_red ||
-        result.joints?.some(j => j.status === 'critical' || (j.status as string) === 'red' || j.deviation >= 3.5) ||
-        (result.predicted_pose !== 'no_pose' && currentPose?.model_class_name && !isPoseMatch(result.predicted_pose, currentPose.model_class_name))
-      );
-      const hasWarningJoint = Boolean(
-        result.has_yellow ||
-        result.joints?.some(j => (j.status === 'warning' || j.status === 'misaligned') && j.deviation < 3.5)
-      );
+      // 5. UI states. Four cases:
+      if (!result.pose_detected) {
+        // Case 1: !pose_detected -> "Step into frame." Gray skeleton. No red.
+        setPostureAnalysis((prev) => ({
+          ...prev,
+          score: 0,
+          alignmentStatus: 'Step into frame.',
+          encouragingFeedback: 'Step into frame to begin posture tracking.',
+          keyCues: ['Step into frame.'],
+        }));
+      } else if (result.pose_mismatch) {
+        // Case 2: pose_mismatch -> correction_message ("You're doing Tree. Switch to Triangle."). Gray skeleton.
+        const msg = result.correction_message || `Detected different pose. Switch to ${currentPose?.name || 'target pose'}.`;
+        setPostureAnalysis((prev) => ({
+          ...prev,
+          score: 40,
+          alignmentStatus: 'Pose Mismatch',
+          encouragingFeedback: msg,
+          keyCues: [msg],
+        }));
+      } else if (!result.reference_available) {
+        // Case 3: !reference_available -> Small "Limited feedback" note. Joints not truly scored.
+        const msg = result.correction_message || 'Limited feedback available for this pose.';
+        setPostureAnalysis((prev) => ({
+          ...prev,
+          score: Math.round(result.confidence * 85),
+          alignmentStatus: 'Limited feedback',
+          encouragingFeedback: msg,
+          keyCues: [msg],
+        }));
+      } else {
+        // Case 4: Normal -> Colored joints + correction_message
+        const msg = result.correction_message || (result.is_correct ? `Holding ${currentPose?.name || 'pose'} with excellent form. Keep steady!` : 'Maintain form.');
+        setPostureAnalysis((prev) => ({
+          ...prev,
+          score: result.is_correct ? Math.max(92, Math.round(result.confidence * 100)) : result.has_red ? 45 : 78,
+          alignmentStatus: result.is_correct ? 'All Joints Perfect (Aligned)' : result.has_red ? 'Mistake Detected (Red)' : 'Minor Adjustment (Holding - Yellow)',
+          encouragingFeedback: msg,
+          keyCues: [result.correction_message].filter(Boolean) as string[],
+        }));
+      }
 
-      if (result.is_correct) {
-        setPostureAnalysis((prev) => ({
-          ...prev,
-          score: Math.round(Math.max(92, result.confidence * 100)),
-          alignmentStatus: 'All Joints Perfect (Aligned)',
-          encouragingFeedback: `Great form! Holding ${currentPose?.name || 'pose'} accurately.`,
-          keyCues: [`Holding ${currentPose?.name || 'pose'} with excellent form. Keep steady!`],
-        }));
-      } else if (result.predicted_pose === 'no_pose') {
-        setPostureAnalysis((prev) => ({
-          ...prev,
-          alignmentStatus: 'Step into Frame / Normal Posture',
-          encouragingFeedback: 'Take your yoga position. Timer will start when posture is detected.',
-          keyCues: ['Step into frame and assume posture.'],
-        }));
-      } else if (hasCriticalJoint) {
-        // Red: Mistake detected
-        const msg = result.correction_message || 'Joint alignment mistake detected.';
-        setPostureAnalysis((prev) => ({
-          ...prev,
-          score: Math.round(Math.max(45, result.confidence * 65)),
-          alignmentStatus: 'Mistake Detected (Red)',
-          encouragingFeedback: msg,
-          keyCues: [msg],
-        }));
-      } else if (hasWarningJoint || result.correction_message) {
-        // Yellow: Warning / Minor adjustment - timer does not stop!
-        const msg = result.correction_message || 'Minor adjustment needed; maintain your balance.';
-        setPostureAnalysis((prev) => ({
-          ...prev,
-          score: Math.round(Math.max(78, result.confidence * 90)),
-          alignmentStatus: 'Minor Adjustment (Holding - Yellow)',
-          encouragingFeedback: msg,
-          keyCues: [msg],
-        }));
+      // 6. Timer. Backend decides.
+      switch (result.timer_action) {
+        case 'start':
+          setIsPoseActive(true);
+          break;
+        case 'continue':
+          // Keep ticking (yellow never stops timer)
+          break;
+        case 'stop': {
+          setIsPoseActive(false);
+          const currentHold = poseHoldSecondsRef.current;
+          if (currentHold > 0 && selectedPoseIndex !== null) {
+            const pose = ALL_POSES[selectedPoseIndex];
+            if (pose) {
+              setBestHoldPerPose((prev) => {
+                const prevBest = prev[pose.id] || 0;
+                if (currentHold > prevBest) {
+                  setPersonalBestToast({
+                    poseName: pose.name,
+                    seconds: currentHold,
+                    prior: prevBest,
+                  });
+                  return { ...prev, [pose.id]: currentHold };
+                }
+                return prev;
+              });
+            }
+            setPoseHoldSeconds(0);
+          }
+          break;
+        }
+        case 'idle':
+          break;
       }
     },
   });
@@ -605,6 +647,56 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     };
   }, []);
 
+  // Global Session Keyboard Shortcuts (Space=Pause/Resume, M=Mute, V=Voice, F=Fullscreen, P/D=Pose Drawer, Esc=Exit)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        setIsPoseActive((prev) => {
+          const next = !prev;
+          soundEngine.playChime(next ? 528 : 400, 0.4);
+          return next;
+        });
+      } else if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        setVoiceSpeechEnabled((prev) => {
+          const next = !prev;
+          if (next) soundEngine.speak('Voice coaching cues unmuted.');
+          return next;
+        });
+      } else if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        voiceController.toggleListening();
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen?.().catch(() => {});
+        } else {
+          document.exitFullscreen?.().catch(() => {});
+        }
+      } else if (e.key === 'p' || e.key === 'P' || e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        setIsDrawerOpen((prev) => !prev);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        if (showExitConfirm) {
+          setShowExitConfirm(false);
+        } else if (isDrawerOpen) {
+          setIsDrawerOpen(false);
+        } else {
+          setShowExitConfirm(true);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [showExitConfirm, isDrawerOpen, voiceController]);
+
   // Timers: Continuous total session timer + pose hold timer when active
   useEffect(() => {
     const sessionInterval = setInterval(() => {
@@ -621,57 +713,61 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     return () => clearInterval(sessionInterval);
   }, []);
 
+  // Hold timer refs to decouple 10Hz WebSocket updates from 1Hz timer
+  const modelPoseResultRef = useRef<PoseDetectionResult | null>(modelPoseResult);
+  modelPoseResultRef.current = modelPoseResult;
+  const poseHoldSecondsRef = useRef(poseHoldSeconds);
+  poseHoldSecondsRef.current = poseHoldSeconds;
+  const voiceSpeechEnabledRef = useRef(voiceSpeechEnabled);
+  voiceSpeechEnabledRef.current = voiceSpeechEnabled;
+
   // Model-driven Pose Hold Timer:
-  // Timer runs when user is in the pose and NO RED joint/mistake is detected.
-  // Even if there is a yellow warning, the timer does NOT stop! It keeps running until a red is detected.
+  // Decoupled 1-second interval ticks smoothly while ready and holding pose
   useEffect(() => {
     if (!isPoseActive || selectedPoseIndex === null) return;
 
     const pose = ALL_POSES[selectedPoseIndex];
     if (!pose) return;
 
-    // Check if red is detected (severe mistake or wrong pose)
-    const hasRedJoint = Boolean(
-      modelPoseResult?.has_red ||
-      modelPoseResult?.joints?.some(
-        (j) => j.status === 'critical' || (j.status as string) === 'red' || j.deviation >= 3.5
-      ) ||
-      (modelPoseResult && modelPoseResult.predicted_pose !== 'no_pose' && pose.model_class_name &&
-        !isPoseMatch(modelPoseResult.predicted_pose, pose.model_class_name))
-    );
-
-    // If red is detected, or no pose detected at all while holding
-    const isRedOrIdle = !modelPoseResult || modelPoseResult.predicted_pose === 'no_pose' || hasRedJoint;
-
-    if (isRedOrIdle) {
-      // If user had an active streak and made a RED mistake, update best time and reset
-      if (poseHoldSeconds > 0) {
-        setBestHoldPerPose((prev) => {
-          const prevBest = prev[pose.id] || 0;
-          if (poseHoldSeconds > prevBest) {
-            setPersonalBestToast({
-              poseName: pose.name,
-              seconds: poseHoldSeconds,
-              prior: prevBest,
-            });
-            if (voiceSpeechEnabled) {
-              soundEngine.speak(`Streak stopped at ${poseHoldSeconds} seconds. New personal best set!`);
-            }
-            return { ...prev, [pose.id]: poseHoldSeconds };
-          } else {
-            if (voiceSpeechEnabled) {
-              soundEngine.speak(`Mistake made. You held for ${poseHoldSeconds} seconds. Your best is ${prevBest} seconds.`);
-            }
-            return prev;
-          }
-        });
-        setPoseHoldSeconds(0);
-      }
-      return;
-    }
-
-    // When NOT red (i.e. all correct green OR minor warning yellow), tick hold seconds every 1000ms!
     const interval = setInterval(() => {
+      const currentResult = modelPoseResultRef.current;
+      const currentHold = poseHoldSecondsRef.current;
+
+      const hasRedJoint = Boolean(
+        currentResult?.has_red ||
+        currentResult?.joints?.some(
+          (j) => j.status === 'critical' || (j.status as string) === 'red' || j.deviation >= 4.0
+        )
+      );
+
+      // If critical mistake detected while practitioner had an active hold streak
+      if (hasRedJoint) {
+        if (currentHold > 0) {
+          setBestHoldPerPose((prev) => {
+            const prevBest = prev[pose.id] || 0;
+            if (currentHold > prevBest) {
+              setPersonalBestToast({
+                poseName: pose.name,
+                seconds: currentHold,
+                prior: prevBest,
+              });
+              if (voiceSpeechEnabledRef.current) {
+                soundEngine.speak(`Streak stopped at ${currentHold} seconds. New personal best set!`);
+              }
+              return { ...prev, [pose.id]: currentHold };
+            } else {
+              if (voiceSpeechEnabledRef.current) {
+                soundEngine.speak(`Adjustment needed. You held for ${currentHold} seconds.`);
+              }
+              return prev;
+            }
+          });
+          setPoseHoldSeconds(0);
+        }
+        return;
+      }
+
+      // Normal aligned hold or minor yellow adjustment -> Increment hold timer
       setPoseHoldSeconds((prevStreak) => {
         const nextStreak = prevStreak + 1;
 
@@ -684,7 +780,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                 seconds: nextStreak,
                 prior: currentBest,
               });
-              if (voiceSpeechEnabled) {
+              if (voiceSpeechEnabledRef.current) {
                 soundEngine.playChime(880, 0.4);
               }
             }
@@ -698,7 +794,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isPoseActive, selectedPoseIndex, modelPoseResult, voiceSpeechEnabled, poseHoldSeconds]);
+  }, [isPoseActive, selectedPoseIndex]);
 
   // Handle Pose Selection (manual click or voice selection) - sets pose but waits for user to be ready!
   const handleSelectPose = (idx: number, isNextPose = false) => {
@@ -707,22 +803,34 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
     const isSamePose = selectedPoseIndex === idx;
 
-    // Record previous pose metrics if active
-    if (currentPose && isPoseActive && poseHoldSeconds > 0 && !isSamePose) {
-      setPoseRecords((prev) => ({
-        ...prev,
-        [currentPose.id]: {
-          poseId: currentPose.id,
-          poseName: currentPose.name,
-          sanskritName: currentPose.sanskritName,
-          durationSeconds: (prev[currentPose.id]?.durationSeconds || 0) + poseHoldSeconds,
-          bestHoldSeconds: Math.max(prev[currentPose.id]?.bestHoldSeconds || 0, bestHoldPerPose[currentPose.id] || poseHoldSeconds),
-          attemptsCount: (prev[currentPose.id]?.attemptsCount || 0) + 1,
-          accuracyScore: postureAnalysis.score || 92,
-          cuesReceived: postureAnalysis.keyCues || [],
-          status: 'completed',
-        },
-      }));
+    // Record previous pose metrics if active or practiced
+    if (currentPose && !isSamePose) {
+      const priorHold = Math.max(poseHoldSeconds, bestHoldPerPose[currentPose.id] || 0);
+      const priorAttempts = attemptsPerPose[currentPose.id] || (priorHold > 0 ? 1 : 0);
+      if (priorHold > 0 || priorAttempts > 0) {
+        setPoseRecords((prev) => ({
+          ...prev,
+          [currentPose.id]: {
+            poseId: currentPose.id,
+            pose_id: currentPose.id,
+            poseName: currentPose.name,
+            pose_name: currentPose.name,
+            sanskritName: currentPose.sanskritName || '',
+            sanskrit_name: currentPose.sanskritName || '',
+            durationSeconds: (prev[currentPose.id]?.durationSeconds || 0) + (poseHoldSeconds || priorHold),
+            duration_seconds: (prev[currentPose.id]?.durationSeconds || 0) + (poseHoldSeconds || priorHold),
+            bestHoldSeconds: Math.max(prev[currentPose.id]?.bestHoldSeconds || 0, bestHoldPerPose[currentPose.id] || poseHoldSeconds || 1),
+            best_hold_seconds: Math.max(prev[currentPose.id]?.bestHoldSeconds || 0, bestHoldPerPose[currentPose.id] || poseHoldSeconds || 1),
+            attemptsCount: Math.max(prev[currentPose.id]?.attemptsCount || 0, priorAttempts),
+            attempts_count: Math.max(prev[currentPose.id]?.attemptsCount || 0, priorAttempts),
+            accuracyScore: postureAnalysis.score || 92,
+            accuracy_score: postureAnalysis.score || 92,
+            cuesReceived: postureAnalysis.keyCues || [],
+            cues_received: postureAnalysis.keyCues || [],
+            status: 'completed',
+          },
+        }));
+      }
     }
 
     setSelectedPoseIndex(idx);
@@ -808,40 +916,41 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     stopCamera();
 
     let finalRecordsMap = { ...poseRecords };
-    // Only record currentPose if it was actually held for at least 3 seconds
-    if (currentPose && (poseHoldSeconds >= 3 || (poseRecords[currentPose.id]?.durationSeconds || 0) >= 3)) {
-      const existing = poseRecords[currentPose.id];
-      const bestHold = Math.max(
-        existing?.bestHoldSeconds || 0,
-        bestHoldPerPose[currentPose.id] || poseHoldSeconds
-      );
-      finalRecordsMap[currentPose.id] = {
-        poseId: currentPose.id,
-        pose_id: currentPose.id,
-        poseName: currentPose.name,
-        pose_name: currentPose.name,
-        sanskritName: currentPose.sanskritName || '',
-        sanskrit_name: currentPose.sanskritName || '',
-        durationSeconds: (existing?.durationSeconds || 0) + poseHoldSeconds,
-        duration_seconds: (existing?.durationSeconds || 0) + poseHoldSeconds,
-        bestHoldSeconds: bestHold,
-        best_hold_seconds: bestHold,
-        attemptsCount: (existing?.attemptsCount || 0) + (attemptsPerPose[currentPose.id] || 1),
-        attempts_count: (existing?.attemptsCount || 0) + (attemptsPerPose[currentPose.id] || 1),
-        accuracyScore: postureAnalysis.score || 92,
-        accuracy_score: postureAnalysis.score || 92,
-        cuesReceived: postureAnalysis.keyCues || [],
-        cues_received: postureAnalysis.keyCues || [],
-        status: 'completed',
-      };
-    }
 
-    // Filter strictly to poses where practitioner held for at least 3 seconds
-    const finalRecords: SessionPoseRecord[] = Object.values(finalRecordsMap).filter(
-      (r) => (Number(r.durationSeconds || (r as any).duration_seconds || 0) >= 3 || Number(r.bestHoldSeconds || (r as any).best_hold_seconds || 0) >= 3)
-    );
+    // Sweep through all poses and include any pose that was actively held or attempted
+    ALL_POSES.forEach((p) => {
+      const best = bestHoldPerPose[p.id] || 0;
+      const attempts = attemptsPerPose[p.id] || 0;
+      const isCur = currentPose?.id === p.id;
+      const hold = isCur ? Math.max(poseHoldSeconds, best) : best;
+      
+      if (hold > 0 || attempts > 0 || (isCur && isPoseActive && poseHoldSeconds > 0)) {
+        const existing = finalRecordsMap[p.id];
+        finalRecordsMap[p.id] = {
+          poseId: p.id,
+          pose_id: p.id,
+          poseName: p.name,
+          pose_name: p.name,
+          sanskritName: p.sanskritName || '',
+          sanskrit_name: p.sanskritName || '',
+          durationSeconds: (existing?.durationSeconds || 0) + (isCur ? (poseHoldSeconds || hold || 1) : Math.max(1, hold)),
+          duration_seconds: (existing?.durationSeconds || 0) + (isCur ? (poseHoldSeconds || hold || 1) : Math.max(1, hold)),
+          bestHoldSeconds: Math.max(existing?.bestHoldSeconds || 0, best, isCur ? poseHoldSeconds : 0, 1),
+          best_hold_seconds: Math.max(existing?.bestHoldSeconds || 0, best, isCur ? poseHoldSeconds : 0, 1),
+          attemptsCount: Math.max(existing?.attemptsCount || 0, attempts, 1),
+          attempts_count: Math.max(existing?.attemptsCount || 0, attempts, 1),
+          accuracyScore: existing?.accuracyScore || postureAnalysis.score || 92,
+          accuracy_score: existing?.accuracyScore || postureAnalysis.score || 92,
+          cuesReceived: existing?.cuesReceived || postureAnalysis.keyCues || [],
+          cues_received: existing?.cuesReceived || postureAnalysis.keyCues || [],
+          status: 'completed',
+        };
+      }
+    });
 
-    // If no poses were held, do NOT generate a false report!
+    const finalRecords: SessionPoseRecord[] = Object.values(finalRecordsMap);
+
+    // If no poses were held or recorded, do NOT generate a report or send email; display toast notice
     if (finalRecords.length === 0) {
       if (onNoPosesPracticed) {
         onNoPosesPracticed();
@@ -880,12 +989,17 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     onFinishSession(sessionData);
   };
 
-  // Names of the poses actually practiced so far (finished holds + the pose currently being held)
+  // Names of the poses actually practiced so far (finished holds + attempted + the pose currently being held)
   const practicedPoseNames: string[] = (() => {
     const names: string[] = [];
     Object.values(poseRecords).forEach((r: any) => {
       const n = r?.poseName || r?.pose_name;
       if (n && !names.includes(n)) names.push(n);
+    });
+    ALL_POSES.forEach((p) => {
+      if ((bestHoldPerPose[p.id] || 0) > 0 || (attemptsPerPose[p.id] || 0) > 0) {
+        if (!names.includes(p.name)) names.push(p.name);
+      }
     });
     if (currentPose && (isPoseActive || poseHoldSeconds > 0) && !names.includes(currentPose.name)) {
       names.push(currentPose.name);
@@ -957,18 +1071,15 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       {/* TOP HEADER & SESSION STATUS BAR                                           */}
       {/* ========================================================================= */}
       <header className="px-3 sm:px-5 py-2.5 bg-stone-900/95 border-b border-stone-800/80 backdrop-blur-xl flex flex-wrap items-center justify-between gap-2 shrink-0 z-40 shadow-lg">
-        {/* Brand & Pose / Session State */}
-        <div className="flex items-center gap-3">
+        {/* Brand & Pose / Session State & Session Timer on Left */}
+        <div className="flex items-center gap-3 flex-wrap">
           <div onClick={() => setShowExitConfirm(true)} className="cursor-pointer">
             <AsanaSenseLogo size="sm" textColor="text-white" showText={false} />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="font-bold text-white text-sm sm:text-base tracking-wide flex items-center gap-1.5">
-                <span>ASANA - SENSE</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30">
-                  LIVE STUDIO
-                </span>
+              <h1 className="font-bold text-white text-sm sm:text-base tracking-wide">
+                ASANA - SENSE
               </h1>
             </div>
             <p className="text-xs text-stone-400 flex items-center gap-1.5">
@@ -992,92 +1103,18 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               )}
             </p>
           </div>
-        </div>
 
-        {/* Header Controls */}
-        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
-          {/* AI Master Coach Badge - Veda AI Exclusively */}
-          <div className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-950 to-teal-950 border border-emerald-500/50 text-xs text-emerald-300 font-bold flex items-center gap-1.5 shadow-xs">
-            <Sparkles className="w-3 h-3 text-emerald-400 animate-pulse" />
-            <span>Veda AI</span>
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">Engine</span>
-          </div>
-
-          {/* Total Session Time */}
-          <div className="px-2.5 py-1.5 rounded-xl bg-stone-800/90 border border-stone-700/80 text-xs flex items-center gap-1.5 shadow-xs">
+          {/* Total Session Time (Moved to Left Side) */}
+          <div className="px-2.5 py-1.5 rounded-xl bg-stone-800/90 border border-stone-700/80 text-xs flex items-center gap-1.5 shadow-xs ml-0 sm:ml-2">
             <Timer className="w-3.5 h-3.5 text-emerald-400" />
             <span className="text-stone-400 hidden sm:inline">Session:</span>
             <span className="font-mono font-bold text-white">{formatTime(totalSessionSeconds)}</span>
           </div>
+        </div>
 
-          {/* Manual Split Adjusters */}
-          {isDrawerOpen && (
-            <div className="hidden md:flex items-center bg-stone-800/90 p-0.5 rounded-xl border border-stone-700 text-[11px]">
-              <button
-                onClick={() => setSplitPercent(50)}
-                className={`px-2 py-1 rounded-lg font-bold transition cursor-pointer flex items-center gap-1 ${
-                  splitPercent === 50 ? 'bg-emerald-600 text-white shadow-xs' : 'text-stone-400 hover:text-stone-200'
-                }`}
-                title="50:50 Split"
-              >
-                <Columns className="w-3 h-3" />
-                <span>50:50</span>
-              </button>
-              <button
-                onClick={() => setSplitPercent(60)}
-                className={`px-2 py-1 rounded-lg font-bold transition cursor-pointer ${
-                  splitPercent === 60 ? 'bg-emerald-600 text-white shadow-xs' : 'text-stone-400 hover:text-stone-200'
-                }`}
-                title="60:40 Split"
-              >
-                60:40
-              </button>
-              <button
-                onClick={() => setSplitPercent(40)}
-                className={`px-2 py-1 rounded-lg font-bold transition cursor-pointer ${
-                  splitPercent === 40 ? 'bg-emerald-600 text-white shadow-xs' : 'text-stone-400 hover:text-stone-200'
-                }`}
-                title="40:60 Split"
-              >
-                40:60
-              </button>
-            </div>
-          )}
-
-          {/* Dedicated Voice Audio Spoken Feedback Mute / Unmute Toggle */}
-          <button
-            id="voice-audio-mute-toggle-btn"
-            type="button"
-            onClick={() => {
-              const nextVal = !voiceSpeechEnabled;
-              setVoiceSpeechEnabled(nextVal);
-              soundEngine.setMuted(!nextVal);
-            }}
-            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none ${
-              voiceSpeechEnabled
-                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/60 hover:border-emerald-400'
-                : 'bg-amber-950/80 text-amber-300 border-amber-500/60 hover:bg-amber-900/80'
-            }`}
-            title={
-              voiceSpeechEnabled
-                ? 'Voice Audio Feedback: ON (Click to Mute Spoken Feedback)'
-                : 'Voice Audio Feedback: MUTED (Click to Enable Spoken Feedback)'
-            }
-          >
-            {voiceSpeechEnabled ? (
-              <Volume2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            ) : (
-              <VolumeX className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            )}
-            <span className="hidden sm:inline font-medium">
-              {voiceSpeechEnabled ? 'Voice Audio: On' : 'Voice Audio: Muted'}
-            </span>
-          </button>
-
-          {/* Ambient Meditative Music Soundscapes & Custom Audio Player */}
-          <AmbientAudioPlayer />
-
-          {/* Dedicated Voice-Command Toggle Switch (Auto Opens Movable Commands Table) */}
+        {/* Header Controls Right */}
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+          {/* Dedicated Voice-Command Toggle Switch (Auto Opens Docked Commands Table) */}
           <div className="relative">
             <button
               id="voice-control-toggle-btn"
@@ -1086,14 +1123,16 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                 e.preventDefault();
                 e.stopPropagation();
                 voiceController.toggleListening();
-                setShowVoiceCmdTable(!showVoiceCmdTable);
+                if (voiceController.isSupported && !voiceController.errorMessage) {
+                  setShowVoiceCmdTable((prev) => !prev);
+                }
               }}
               className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-2 transition cursor-pointer shadow-xs select-none ${
                 voiceController.isListening || showVoiceCmdTable
                   ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/80 ring-2 ring-emerald-500/40 shadow-emerald-950/40'
                   : voiceController.errorMessage
                   ? 'bg-amber-950/80 text-amber-300 border-amber-500/60'
-                  : 'bg-stone-800/90 text-stone-300 border-stone-700 hover:bg-stone-700/90 hover:text-white'
+                  : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700 hover:text-white'
               }`}
               title={
                 voiceController.errorMessage ||
@@ -1136,20 +1175,6 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               </div>
             )}
           </div>
-
-          {/* Toggle Right Pose Drawer Button */}
-          <button
-            id="toggle-drawer-top-btn"
-            onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-            className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
-              isDrawerOpen
-                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
-                : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700'
-            }`}
-          >
-            {isDrawerOpen ? <PanelRightClose className="w-3.5 h-3.5 text-emerald-400" /> : <PanelRightOpen className="w-3.5 h-3.5 text-emerald-400" />}
-            <span>Poses (8)</span>
-          </button>
 
           {/* Finish & Generate Report */}
           <button
@@ -1335,10 +1360,140 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                     ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
                     : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700'
                 }`}
-                title="Toggle Full Body Fit vs Wide Fill"
+                title={
+                  videoFitMode === 'contain'
+                    ? 'Full Body Fit: Displays 100% of camera frame without cropping, essential for wide arm/leg joint detection'
+                    : 'Fill View: Scales video edge-to-edge for full mirror viewport immersion'
+                }
               >
                 <Scan className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">{videoFitMode === 'contain' ? 'Full Body Fit' : 'Fill View'}</span>
+              </button>
+
+              {/* Dedicated Voice Audio Spoken Feedback Mute / Unmute Toggle */}
+              <button
+                id="voice-audio-mute-toggle-btn"
+                type="button"
+                onClick={() => {
+                  const nextVal = !voiceSpeechEnabled;
+                  setVoiceSpeechEnabled(nextVal);
+                  soundEngine.setMuted(!nextVal);
+                }}
+                className={`px-2.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none ${
+                  voiceSpeechEnabled
+                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                    : 'bg-stone-800 text-stone-400 border-stone-700 hover:bg-stone-700 hover:text-stone-200'
+                }`}
+                title={
+                  voiceSpeechEnabled
+                    ? 'Voice coaching: Enabled (Click to Mute Spoken Cues)'
+                    : 'Voice coaching: Muted (Click to Enable Spoken Cues)'
+                }
+              >
+                {voiceSpeechEnabled ? (
+                  <Volume2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                ) : (
+                  <VolumeX className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                )}
+                <span>Voice</span>
+              </button>
+
+              {/* Studio Split Layout Adjustment Option (50:50, 60:40, 40:60) */}
+              <div className="relative">
+                <button
+                  id="split-adjustment-toggle-btn"
+                  type="button"
+                  onClick={() => setShowSplitAdjustMenu(!showSplitAdjustMenu)}
+                  className={`px-2.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none ${
+                    showSplitAdjustMenu
+                      ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/60 ring-2 ring-emerald-500/30'
+                      : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700 hover:text-white'
+                  }`}
+                  title="Studio Layout Split: Adjust camera & pose shelf ratio (50:50, 60:40, 40:60)"
+                >
+                  <Columns className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Adjust: {splitPercent}:{100 - splitPercent}</span>
+                </button>
+
+                {/* Upward Floating Adjustment Popover Menu */}
+                {showSplitAdjustMenu && (
+                  <div className="absolute bottom-full left-0 mb-2 w-48 bg-stone-900/95 border border-emerald-500/40 rounded-2xl shadow-2xl p-2 z-50 backdrop-blur-xl text-stone-100 space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="flex items-center justify-between px-2 py-1 text-[10px] font-bold text-stone-400 uppercase tracking-wider border-b border-stone-800">
+                      <span>Split Adjustment</span>
+                      <span className="font-mono text-emerald-400">{splitPercent}:{100 - splitPercent}</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSplitPercent(50);
+                        if (!isDrawerOpen) setIsDrawerOpen(true);
+                        setShowSplitAdjustMenu(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs flex items-center justify-between transition cursor-pointer ${
+                        splitPercent === 50
+                          ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                          : 'text-stone-300 hover:bg-stone-800 hover:text-white'
+                      }`}
+                    >
+                      <span className="font-mono font-bold">50:50</span>
+                      <span className="text-[10px] opacity-75">Balanced</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSplitPercent(60);
+                        if (!isDrawerOpen) setIsDrawerOpen(true);
+                        setShowSplitAdjustMenu(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs flex items-center justify-between transition cursor-pointer ${
+                        splitPercent === 60
+                          ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                          : 'text-stone-300 hover:bg-stone-800 hover:text-white'
+                      }`}
+                    >
+                      <span className="font-mono font-bold">60:40</span>
+                      <span className="text-[10px] opacity-75">Wide Camera</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSplitPercent(40);
+                        if (!isDrawerOpen) setIsDrawerOpen(true);
+                        setShowSplitAdjustMenu(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs flex items-center justify-between transition cursor-pointer ${
+                        splitPercent === 40
+                          ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                          : 'text-stone-300 hover:bg-stone-800 hover:text-white'
+                      }`}
+                    >
+                      <span className="font-mono font-bold">40:60</span>
+                      <span className="text-[10px] opacity-75">Wide Shelf</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Ambient Meditative Music Soundscapes & Custom Audio Player (Icon Only, Dropdown Up) */}
+              <AmbientAudioPlayer iconOnly dropdownDirection="up" />
+
+              {/* Toggle Right Pose Drawer Button (Aligned next to music player) */}
+              <button
+                id="toggle-drawer-bottom-btn"
+                type="button"
+                onClick={() => setIsDrawerOpen(!isDrawerOpen)}
+                className={`px-2.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
+                  isDrawerOpen
+                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                    : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700 hover:text-white'
+                }`}
+                title={isDrawerOpen ? 'Close 8 Poses Shelf' : 'Open 8 Poses Shelf'}
+              >
+                {isDrawerOpen ? <PanelRightClose className="w-3.5 h-3.5 text-emerald-400" /> : <PanelRightOpen className="w-3.5 h-3.5 text-emerald-400" />}
+                <span>Poses (8)</span>
               </button>
 
             </div>

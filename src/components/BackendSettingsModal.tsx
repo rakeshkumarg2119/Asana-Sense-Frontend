@@ -30,6 +30,7 @@ import {
   normalizeBackendUrl,
   clearAllLocalStorage
 } from '../utils/apiClient';
+import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 
 interface BackendSettingsModalProps {
   isOpen: boolean;
@@ -40,6 +41,7 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const containerRef = useModalFocusTrap({ isOpen, onClose });
   const [inputUrl, setInputUrl] = useState<string>('');
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [statusReport, setStatusReport] = useState<BackendStatusReport | null>(null);
@@ -140,21 +142,31 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
   const isNgrokUrl = inputUrl.toLowerCase().includes('ngrok');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-stone-950/70 backdrop-blur-md animate-fade-in overflow-y-auto">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-stone-950/70 backdrop-blur-md animate-fade-in overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="backend-settings-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div 
-        className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden my-8"
+        ref={containerRef}
+        tabIndex={-1}
+        className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden my-8 focus:outline-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
         <div className="bg-gradient-to-r from-stone-900 via-stone-850 to-stone-900 px-6 py-5 text-white flex items-center justify-between border-b border-stone-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shadow-inner">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shadow-inner" aria-hidden="true">
               <Settings className="w-5 h-5 animate-spin-slow" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold font-serif text-white tracking-wide">
-                  Python Backend & Ngrok Bridge
+                <h2 id="backend-settings-title" className="text-lg font-bold font-serif text-white tracking-wide">
+                  Settings
                 </h2>
                 {statusReport?.connected ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -169,17 +181,18 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
                 )}
               </div>
               <p className="text-xs text-stone-400 mt-0.5">
-                Connect seamlessly with your local or cloud Python FastAPI / MediaPipe server
+                Configure backend server endpoints and application preferences
               </p>
             </div>
           </div>
 
           <button
+            type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-white flex items-center justify-center transition cursor-pointer"
-            aria-label="Close"
+            className="w-8 h-8 rounded-full bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-white flex items-center justify-center transition cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2"
+            aria-label="Close settings modal"
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
 
@@ -188,7 +201,7 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
           {/* URL Input Section */}
           <div className="space-y-3">
             <label className="block text-xs font-bold text-stone-800 uppercase tracking-wider">
-              Python Backend Endpoint (Ngrok / HTTP / HTTPS)
+              Backend Endpoint (Ngrok / HTTP / HTTPS)
             </label>
             <div className="relative flex items-center">
               <div className="absolute left-3.5 text-stone-400 flex items-center pointer-events-none">
@@ -247,96 +260,6 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
                 Ngrok Tunnel
               </button>
             </div>
-          </div>
-
-          {/* Status & Diagnostic Card */}
-          <div className={`p-4 sm:p-5 rounded-2xl border transition ${
-            statusReport?.connected 
-              ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950' 
-              : 'bg-stone-50 border-stone-200 text-stone-800'
-          }`}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                  statusReport?.connected 
-                    ? 'bg-emerald-600 text-white shadow-sm' 
-                    : 'bg-stone-200 text-stone-500'
-                }`}>
-                  {statusReport?.connected ? (
-                    <CheckCircle2 className="w-4 h-4" />
-                  ) : (
-                    <WifiOff className="w-4 h-4" />
-                  )}
-                </div>
-                <div>
-                  <h4 className="text-xs sm:text-sm font-bold flex items-center gap-2">
-                    {statusReport?.connected ? 'Python Backend Active & Verified' : 'Status Check & Bridge Diagnostics'}
-                    {statusReport?.latencyMs !== undefined && (
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/80 border border-stone-200 text-stone-600">
-                        {statusReport.latencyMs} ms
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-xs text-stone-600 mt-0.5">
-                    {statusReport?.message || 'Click "Connect" to probe the Python server endpoints'}
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleTestConnection(inputUrl)}
-                disabled={isTesting}
-                className="p-1.5 rounded-lg hover:bg-white text-stone-500 hover:text-stone-800 transition cursor-pointer"
-                title="Re-test status"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isTesting ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-
-            {/* Detailed Endpoints Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-4 pt-3 border-t border-stone-200/80 text-xs font-mono">
-              <div className="p-2.5 rounded-xl bg-white border border-stone-200 flex flex-col justify-between">
-                <div className="flex items-center justify-between text-[11px] font-sans font-semibold text-stone-500 mb-1">
-                  <span>REST API Route</span>
-                  <span className={statusReport?.connected ? 'text-emerald-700' : 'text-stone-400'}>
-                    {statusReport?.httpStatus ? `HTTP ${statusReport.httpStatus}` : 'Untested'}
-                  </span>
-                </div>
-                <div className="text-[11px] text-stone-800 truncate" title={statusReport?.apiUrl || inputUrl}>
-                  {statusReport?.apiUrl || inputUrl || 'http://localhost:8000'}
-                </div>
-              </div>
-
-              <div className="p-2.5 rounded-xl bg-white border border-stone-200 flex flex-col justify-between">
-                <div className="flex items-center justify-between text-[11px] font-sans font-semibold text-stone-500 mb-1">
-                  <span>Live Pose WebSocket</span>
-                  <span className={wsTestResult?.success ? 'text-emerald-700 font-bold' : 'text-stone-400'}>
-                    {wsTestResult?.success ? 'WS Ready' : 'Auto /ws/pose-detect'}
-                  </span>
-                </div>
-                <div className="text-[11px] text-stone-800 truncate" title={`${currentWs}/ws/pose-detect`}>
-                  {currentWs}/ws/pose-detect
-                </div>
-              </div>
-            </div>
-
-            {statusReport?.serverInfo && (
-              <div className="mt-2.5 text-[11px] text-stone-500 flex items-center gap-1.5">
-                <Server className="w-3.5 h-3.5 text-stone-400" />
-                <span>Detected: <strong>{statusReport.serverInfo}</strong></span>
-              </div>
-            )}
-
-            {statusReport?.fixTip && (
-              <div className="mt-3 p-3 rounded-xl bg-amber-100/90 border border-amber-300 text-amber-900 text-xs flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                <div className="flex-1 space-y-1">
-                  <div className="font-bold text-amber-950">Quick Tip:</div>
-                  <div className="font-mono text-[11px] text-amber-900 leading-relaxed">{statusReport.fixTip}</div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 

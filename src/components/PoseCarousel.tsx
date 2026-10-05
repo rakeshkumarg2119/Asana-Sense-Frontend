@@ -39,22 +39,40 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
     setActiveIndex((prev) => (prev + 1) % totalPoses);
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      handlePrev();
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      handleNext();
+    }
+  };
+
   const activePose = ALL_POSES[activeIndex];
 
   return (
-    <section id="pose-carousel-showcase" className="relative py-12 sm:py-16 px-3.5 sm:px-8 lg:px-14 max-w-[1720px] w-full mx-auto overflow-hidden">
+    <section 
+      id="pose-carousel-showcase" 
+      className="relative py-12 sm:py-16 px-3.5 sm:px-8 lg:px-14 max-w-[1720px] w-full mx-auto overflow-hidden focus:outline-hidden"
+      role="region"
+      aria-roledescription="carousel"
+      aria-label="Curated Yoga Posture Spectrum"
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+    >
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
         <div>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold uppercase tracking-wider mb-2">
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+            <Sparkles className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
             Master Pose Spectrum • Biomechanical Library
           </div>
           <h2 className="text-2xl sm:text-3xl font-serif font-bold text-stone-900 tracking-tight">
             Curated Posture Spectrum
           </h2>
           <p className="text-stone-600 text-sm sm:text-base mt-1 max-w-2xl">
-            Explore 8 master postures engineered with biomechanical alignment markers, wrong posture impact warnings, and real-time AI accuracy tracking.
+            Explore 8 master postures engineered with biomechanical alignment markers, wrong posture impact warnings, and real-time AI accuracy tracking. <span className="text-xs text-stone-400 block sm:inline">(Use ← / → keys to navigate)</span>
           </p>
         </div>
 
@@ -62,22 +80,24 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
         <div className="flex items-center gap-3 self-start md:self-end">
           <button
             id="carousel-prev-button"
+            type="button"
             onClick={handlePrev}
-            aria-label="Previous pose"
-            className="w-10 h-10 rounded-full border border-stone-200 bg-white hover:bg-stone-50 hover:border-emerald-400 active:scale-95 transition flex items-center justify-center text-stone-700 shadow-sm cursor-pointer"
+            aria-label="Previous pose (Left Arrow)"
+            className="w-10 h-10 rounded-full border border-stone-200 bg-white hover:bg-stone-50 hover:border-emerald-400 active:scale-95 transition flex items-center justify-center text-stone-700 shadow-sm cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
           >
-            <ChevronLeft className="w-5 h-5" />
+            <ChevronLeft className="w-5 h-5" aria-hidden="true" />
           </button>
-          <div className="text-xs font-medium text-stone-500 tabular-nums px-2">
+          <div className="text-xs font-medium text-stone-500 tabular-nums px-2" aria-live="polite">
             <span className="text-stone-900 font-bold text-sm">{activeIndex + 1}</span> / {totalPoses}
           </div>
           <button
             id="carousel-next-button"
+            type="button"
             onClick={handleNext}
-            aria-label="Next pose"
-            className="w-10 h-10 rounded-full border border-stone-200 bg-white hover:bg-stone-50 hover:border-emerald-400 active:scale-95 transition flex items-center justify-center text-stone-700 shadow-sm cursor-pointer"
+            aria-label="Next pose (Right Arrow)"
+            className="w-10 h-10 rounded-full border border-stone-200 bg-white hover:bg-stone-50 hover:border-emerald-400 active:scale-95 transition flex items-center justify-center text-stone-700 shadow-sm cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
           >
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -229,17 +249,20 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
           </AnimatePresence>
 
           {/* Action CTAs */}
-          <div className="pt-5 mt-4 border-t border-stone-200 flex flex-wrap items-center gap-3">
+          <div className="pt-5 mt-4 border-t border-stone-200 flex flex-col sm:flex-row sm:items-center gap-3 w-full">
             <button
               id={`practice-pose-${activePose.id}`}
+              type="button"
               onClick={() => onSelectPoseForPractice(activePose)}
-              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-semibold text-sm transition flex items-center gap-2 shadow-sm cursor-pointer"
+              aria-label={`Practice ${activePose.name} with AI Vision Feedback`}
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-semibold text-sm transition flex items-center justify-center gap-2 shadow-sm cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
             >
-              <Activity className="w-4 h-4" />
-              Practice with AI Vision Feedback
+              <Activity className="w-4 h-4" aria-hidden="true" />
+              <span>Practice with AI Vision Feedback</span>
             </button>
             <button
               id={`view-details-${activePose.id}`}
+              type="button"
               onClick={() => {
                 if (!userProfile) {
                   onOpenAuth?.();
@@ -247,27 +270,32 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
                   onViewPoseDetails(activePose);
                 }
               }}
-              className="px-5 py-2.5 rounded-2xl bg-white hover:bg-stone-50 active:scale-95 text-stone-800 font-semibold text-sm transition border border-stone-300 shadow-2xs cursor-pointer flex items-center gap-2"
+              aria-label={`View full biomechanics and contraindications for ${activePose.name}`}
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-white hover:bg-stone-50 active:scale-95 text-stone-800 font-semibold text-sm transition border border-stone-300 shadow-2xs cursor-pointer flex items-center justify-center gap-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
             >
               <span>Full Biomechanics & Contraindications</span>
-              <ArrowUpRight className="w-4 h-4 text-stone-600" />
+              <ArrowUpRight className="w-4 h-4 text-stone-600" aria-hidden="true" />
             </button>
           </div>
         </div>
       </div>
 
       {/* Mini 8-Pose Thumbnail Ribbon */}
-      <div className="mt-6 grid grid-cols-4 sm:grid-cols-8 gap-2 sm:gap-3">
+      <div className="mt-6 grid grid-cols-4 sm:grid-cols-8 gap-2 sm:gap-3" role="tablist" aria-label="Yoga Poses Navigation">
         {ALL_POSES.map((pose, idx) => {
           const isCurrent = idx === activeIndex;
           return (
             <button
               key={pose.id}
               id={`thumb-pose-${pose.id}`}
+              type="button"
+              role="tab"
+              aria-selected={isCurrent}
+              aria-label={`${pose.name} (${pose.sanskritName})`}
               onClick={() => setActiveIndex(idx)}
-              className={`p-2 rounded-xl text-left transition border flex flex-col items-center justify-center text-center cursor-pointer ${
+              className={`p-2 rounded-xl text-left transition border flex flex-col items-center justify-center text-center cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
                 isCurrent
-                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-md scale-105'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-md scale-105 ring-2 ring-emerald-600 ring-offset-2'
                   : 'bg-white text-stone-700 border-stone-200 hover:border-emerald-300 hover:bg-stone-50'
               }`}
             >

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { saveUserProfile, updateProfileOnAPI } from '../utils/profileStorage';
+import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 
 interface PreSessionOnboardingModalProps {
   isOpen: boolean;
@@ -29,6 +30,7 @@ export const PreSessionOnboardingModal: React.FC<PreSessionOnboardingModalProps>
   onClose,
   onComplete,
 }) => {
+  const containerRef = useModalFocusTrap({ isOpen, onClose });
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
 
   // Question 1: Age Category
@@ -147,32 +149,37 @@ export const PreSessionOnboardingModal: React.FC<PreSessionOnboardingModalProps>
         }
       }}
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-stone-950/70 backdrop-blur-sm overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="onboarding-modal-title"
     >
       <motion.div
+        ref={containerRef}
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 10 }}
         transition={{ duration: 0.16 }}
-        className="bg-white rounded-2xl max-w-sm sm:max-w-md w-full p-4 sm:p-5 shadow-xl border border-stone-200 relative my-auto max-h-[92vh] flex flex-col justify-between overflow-y-auto"
+        tabIndex={-1}
+        className="bg-white rounded-2xl max-w-sm sm:max-w-md w-full p-4 sm:p-5 shadow-xl border border-stone-200 relative my-auto max-h-[92vh] flex flex-col justify-between overflow-y-auto focus:outline-hidden"
       >
         {/* Close Button */}
         <button
           id="close-onboarding-btn"
           type="button"
           onClick={onClose}
-          aria-label="Close modal"
-          className="absolute top-3 right-3 w-7 h-7 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition flex items-center justify-center cursor-pointer border border-stone-200 shadow-2xs z-10"
+          aria-label="Close personalization modal"
+          className="absolute top-3 right-3 w-7 h-7 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-800 transition flex items-center justify-center cursor-pointer border border-stone-200 shadow-2xs z-10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="w-3.5 h-3.5" aria-hidden="true" />
         </button>
 
         {/* Modal Header & Progress Indicator */}
         <div className="text-center mb-3 pr-4">
           <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-bold uppercase tracking-wider mb-1">
-            <Sparkles className="w-3 h-3 text-emerald-600" />
+            <Sparkles className="w-3 h-3 text-emerald-600" aria-hidden="true" />
             <span>AI Personalization</span>
           </div>
-          <h3 className="text-base sm:text-lg font-serif font-bold text-stone-900 leading-tight">
+          <h3 id="onboarding-modal-title" className="text-base sm:text-lg font-serif font-bold text-stone-900 leading-tight">
             Tailor Your Practice & Biometrics
           </h3>
 

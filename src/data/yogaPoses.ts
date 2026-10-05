@@ -143,7 +143,7 @@ export const YOGA_POSES: YogaPose[] = [
     image_url: 'https://res.cloudinary.com/yhj7u0bn/image/upload/v1789019345/sholders_stand.jpg',
     keyAlignmentCheckpoints: ['Weight on shoulders not neck', 'Body vertically aligned', 'Elbows shoulder-width', 'Chin tucked', 'Legs active'],
     key_alignment_checkpoints: ['Weight on shoulders not neck', 'Body vertically aligned', 'Elbows shoulder-width', 'Chin tucked', 'Legs active'],
-    model_class_name: 'shoudler_stand',
+    model_class_name: 'shoulder_stand',
     model_class_index: 4,
   },
   {
@@ -176,7 +176,7 @@ export const YOGA_POSES: YogaPose[] = [
     image_url: 'https://res.cloudinary.com/yhj7u0bn/image/upload/v1789034482/1lFCiwdr0bqa_JDFaYD84M_TfvJ3RYy5mWpV0UfRTU7xWcEtRjbrG8vNowmL9pK1tWUVWng9jDML5TQJzC3i10hKS3JXMACiD_tV8sScPBGBF-Bhybv1Vw55Hvul60Z9pL09cCrP.jpg',
     keyAlignmentCheckpoints: ['Front foot forward, back foot angled', 'Legs straight', 'Hinge from hip', 'Arms in vertical line', 'Spine parallel to floor'],
     key_alignment_checkpoints: ['Front foot forward, back foot angled', 'Legs straight', 'Hinge from hip', 'Arms in vertical line', 'Spine parallel to floor'],
-    model_class_name: 'traingle',
+    model_class_name: 'triangle',
     model_class_index: 5,
   },
   {

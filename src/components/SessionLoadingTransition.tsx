@@ -41,7 +41,7 @@ export const SessionLoadingTransition: React.FC<SessionLoadingTransitionProps> =
   const exitSteps = [
     { title: 'Finalizing Hold Telemetry', desc: 'Calculating joint stability and hold accuracy' },
     { title: 'Encrypting Session Records', desc: 'Securing practice statistics in private vault' },
-    { title: 'Synthesizing Biomechanics Report', desc: customMessage || 'Formatting personalized Groq AI alignment insights' },
+    { title: 'Synthesizing Biomechanics Report', desc: customMessage || 'Formatting personalized AI biomechanics alignment insights' },
     { title: 'Returning to Sanctuary Dashboard', desc: 'Session saved safely' },
   ];
 

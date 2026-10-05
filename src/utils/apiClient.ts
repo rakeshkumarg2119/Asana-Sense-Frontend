@@ -1,7 +1,7 @@
 /**
  * Central HTTP/WebSocket client for FastAPI / Python backend with Ngrok Bridge support.
  */
-import type { UserProfile, YogaPose, PracticeSession, AuthResponse, SessionPoseRecord } from '../types';
+import type { UserProfile, YogaPose, PracticeSession, AuthResponse, SessionPoseRecord, PoseDetectionResult } from '../types';
 
 // ── Backend Configuration & Ngrok Bridge ─────────────────────────────────────
 
@@ -99,7 +99,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
       },
     });
   } catch (err: any) {
-    const offlineErr: any = new Error('Server is currently offline / unreachable. Please ensure the backend is running. Once fixed, see you soon!');
+    const offlineErr: any = new Error("Server is temporarily unavailable. We'll be back soon!");
     offlineErr.status = 0;
     offlineErr.isOffline = true;
     throw offlineErr;
@@ -134,6 +134,17 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
       } else {
         errorMsg = res.statusText || `Server error (${res.status})`;
       }
+    }
+
+    if (res.status === 401) {
+      clearToken();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('asana_auth_expired', { detail: { message: errorMsg } }));
+      }
+    } else if (res.status === 403) {
+      errorMsg = 'Account deactivated';
+    } else if (res.status === 429) {
+      errorMsg = 'Too many requests, wait a minute';
     }
 
     if (res.status === 503 && !errorDetail) {
@@ -806,7 +817,7 @@ export async function apiFetchSession(sessionId: string): Promise<PracticeSessio
 // ── WebSocket for Pose Detection ─────────────────────────────────────────────
 
 export function createPoseWebSocket(
-  onMessage: (data: any) => void,
+  onMessage: (data: PoseDetectionResult) => void,
   onError?: (err: Event) => void,
   onClose?: () => void,
 ): WebSocket {
@@ -819,12 +830,39 @@ export function createPoseWebSocket(
   };
 
   ws.onmessage = (event) => {
+    let data: any;
     try {
-      const data = JSON.parse(event.data);
-      onMessage(data);
-    } catch (e) {
-      console.warn('[WS] Failed to parse message:', e);
+      data = JSON.parse(event.data);
+    } catch {
+      return;
     }
+
+    if (data.type === 'error') {
+      console.warn('[WS]', data.code, data.message);
+      if (data.code === 'model_not_loaded') {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('asana_toast', { detail: { message: 'Server model offline' } }));
+        }
+      }
+      return; // never build a result from an error
+    }
+
+    if (data.type !== 'pose_result') return;
+
+    onMessage({
+      predicted_pose: data.predicted_pose ?? 'no_pose',
+      confidence: Number(data.confidence ?? 0),
+      target_pose: data.target_pose ?? '',
+      is_correct: Boolean(data.is_correct),
+      has_red: Boolean(data.has_red),
+      has_yellow: Boolean(data.has_yellow),
+      joints: Array.isArray(data.joints) ? data.joints : [],
+      pose_mismatch: Boolean(data.pose_mismatch),
+      pose_detected: data.pose_detected !== false,
+      reference_available: data.reference_available !== false,
+      timer_action: data.timer_action ?? 'idle',
+      correction_message: data.correction_message ?? '',
+    });
   };
 
   ws.onerror = (err) => {
@@ -883,7 +921,7 @@ export async function apiGenerateSessionReport(payload: {
     throw new Error('FastAPI backend did not return a valid report');
   } catch (e: any) {
     console.warn('[apiClient] FastAPI generate-session-report error:', e?.message || e);
-    throw new Error('FastAPI Biomechanics Server is currently unreachable. Please check backend connection.');
+    throw e;
   }
 }
 
@@ -892,9 +930,19 @@ export async function apiGenerateSessionReport(payload: {
 export async function apiSendSessionEmail(payload: {
   sessionData: any;
   aiReport?: any;
+  to_email?: string;
+  email?: string;
+  user_email?: string;
 }): Promise<{ success: boolean; message: string; to_email?: string }> {
+  const targetEmail = payload.to_email || payload.email || payload.user_email;
   return apiFetch('/api/send-session-report-email', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      sessionData: payload.sessionData,
+      aiReport: payload.aiReport,
+      to_email: targetEmail,
+      email: targetEmail,
+      user_email: targetEmail,
+    }),
   });
 }

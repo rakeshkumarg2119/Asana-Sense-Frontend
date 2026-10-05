@@ -36,10 +36,15 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   onExplorePoses,
 }) => {
   return (
-    <section className="relative z-0 pt-6 sm:pt-8 pb-12 sm:pb-16 px-3.5 sm:px-8 lg:px-14 max-w-[1720px] w-full mx-auto overflow-hidden">
+    <section 
+      id="main-content"
+      tabIndex={-1}
+      aria-label="Main Welcome Section"
+      className="relative z-0 pt-6 sm:pt-8 pb-12 sm:pb-16 px-3.5 sm:px-8 lg:px-14 max-w-[1720px] w-full mx-auto overflow-hidden focus:outline-hidden"
+    >
       {/* Decorative ambient background accents */}
-      <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-emerald-100/50 rounded-full blur-3xl -z-10 pointer-events-none" />
-      <div className="absolute bottom-10 left-1/6 w-[450px] h-[450px] bg-teal-100/40 rounded-full blur-3xl -z-10 pointer-events-none" />
+      <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-emerald-100/50 rounded-full blur-3xl -z-10 pointer-events-none" aria-hidden="true" />
+      <div className="absolute bottom-10 left-1/6 w-[450px] h-[450px] bg-teal-100/40 rounded-full blur-3xl -z-10 pointer-events-none" aria-hidden="true" />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 xl:gap-12 items-center">
         {/* Left Column: Hero Copy & Actions */}
@@ -47,37 +52,37 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
           {/* Tagline Badge with Veda AI identity */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-semibold shadow-2xs">
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600 animate-pulse" aria-hidden="true" />
               <span>Veda AI • Yoga Biomechanics & Voice Vision Studio</span>
             </div>
           </div>
 
           {/* Main Headline */}
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-serif font-black text-stone-900 tracking-tight leading-[1.1]">
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl xl:text-7xl font-serif font-black text-stone-900 tracking-tight leading-[1.1]">
             Align Your Asana With <span className="text-emerald-700 italic">Veda AI</span> Posture Corrections.
           </h1>
 
           {/* Subtitle */}
-          <p className="text-base sm:text-lg text-stone-600 max-w-2xl leading-relaxed">
+          <p className="text-sm sm:text-base lg:text-lg text-stone-600 max-w-2xl leading-relaxed">
             Guided by <strong>Veda AI</strong>, ASANA - SENSE tracks your joint alignment in real time across core yoga postures, corrects hazardous lumbar and knee compensations, listens to voice commands, and formulates Ayurvedic diet plans.
           </p>
 
           {/* Key Assurance Bullet Points */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
             <div className="flex items-center gap-2 text-xs font-medium text-stone-700">
-              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" aria-hidden="true" />
               <span>Camera & voice are never stored or recorded</span>
             </div>
             <div className="flex items-center gap-2 text-xs font-medium text-stone-700">
-              <Mic className="w-4 h-4 text-emerald-600 shrink-0" />
+              <Mic className="w-4 h-4 text-emerald-600 shrink-0" aria-hidden="true" />
               <span>Voice-controlled hands-free pose selection</span>
             </div>
             <div className="flex items-center gap-2 text-xs font-medium text-stone-700">
-              <Timer className="w-4 h-4 text-emerald-600 shrink-0" />
+              <Timer className="w-4 h-4 text-emerald-600 shrink-0" aria-hidden="true" />
               <span>Session timers & comprehensive post-session reports</span>
             </div>
             <div className="flex items-center gap-2 text-xs font-medium text-stone-700">
-              <Lock className="w-4 h-4 text-emerald-600 shrink-0" />
+              <Lock className="w-4 h-4 text-emerald-600 shrink-0" aria-hidden="true" />
               <span>Encrypted private cloud profile vault</span>
             </div>
           </div>
@@ -95,23 +100,27 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               </motion.div>
             )}
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full">
               <button
                 id="hero-start-session-btn"
+                type="button"
                 onClick={onStartPractice}
-                className={`px-6 py-3.5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-sm transition flex items-center gap-2 shadow-lg shadow-emerald-900/15 cursor-pointer relative z-10 ${
+                aria-label="Launch Posture Correction Session"
+                className={`w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/15 cursor-pointer relative z-10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
                   isInitialSignInAnimation && userProfile ? 'ring-4 ring-amber-400 ring-offset-2 animate-pulse' : ''
                 }`}
               >
-                <Activity className="w-4 h-4" />
-                Launch Posture Correction Session
-                <ArrowRight className="w-4 h-4" />
+                <Activity className="w-4 h-4" aria-hidden="true" />
+                <span>Launch Posture Correction Session</span>
+                <ArrowRight className="w-4 h-4" aria-hidden="true" />
               </button>
 
               <button
                 id="hero-explore-poses-btn"
+                type="button"
                 onClick={onExplorePoses}
-                className="px-6 py-3.5 rounded-2xl bg-white hover:bg-stone-50 active:scale-95 text-stone-800 font-semibold text-sm transition border border-stone-300 shadow-2xs cursor-pointer"
+                aria-label="Explore 7 Yoga Postures"
+                className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-white hover:bg-stone-50 active:scale-95 text-stone-800 font-semibold text-sm transition border border-stone-300 shadow-2xs cursor-pointer flex items-center justify-center focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
               >
                 Explore 7 Yoga Postures
               </button>
