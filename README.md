@@ -1,4 +1,4 @@
-# 🧘‍♀️ AsanaSense (Veda AI) — AI-Powered Yoga Biomechanics & Real-Time Posture Coach
+# 🧘‍♀️ AsanaSense — AI-Powered Yoga Biomechanics & Real-Time Posture Coach
 
 <p align="center">
   <img src="https://res.cloudinary.com/yhj7u0bn/image/upload/v1790602123/asana_sense_logo.png" alt="AsanaSense Logo" width="160" />
@@ -10,6 +10,7 @@
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-v4.0-38BDF8?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS v4" /></a>
   <a href="https://developers.google.com/mediapipe"><img src="https://img.shields.io/badge/MediaPipe-Pose_Vision-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="MediaPipe" /></a>
   <a href="https://vitejs.dev/"><img src="https://img.shields.io/badge/Vite-6.0-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" /></a>
+  <a href="https://web.dev/progressive-web-apps/"><img src="https://img.shields.io/badge/PWA-Ready-5A0FC8?style=for-the-badge&logo=pwa&logoColor=white" alt="PWA Ready" /></a>
 </p>
 
 <p align="center">
@@ -20,12 +21,14 @@
 
 ## 🌈 Overview
 
-**AsanaSense** (powered by the **Veda AI Vision Engine**) is an intelligent, privacy-first yoga posture evaluation and guidance application. Built with **React 19**, **TypeScript**, **Tailwind CSS v4**, and **Edge Pose Vision**, AsanaSense provides yoga practitioners with:
+**AsanaSense** is an intelligent, privacy-first yoga posture evaluation and guidance application. Built with **React 19**, **TypeScript**, **Tailwind CSS v4**, and **Edge Pose Vision**, AsanaSense provides yoga practitioners with:
 
 * 🎯 **Sub-second posture alignment cues** and skeletal joint vector tracking
 * 🗣️ **Hands-free continuous speech recognition** and voice commands
 * 🎧 **Adaptive real-time audio guidance** & meditative ambient soundscapes
 * 📊 **Comprehensive session analytics**, personal best timers, and posture score reports
+* 📱 **PWA & Mobile Navigation** — installable as a native desktop/mobile app with responsive slide-over drawer
+* 🔐 **Secure Authentication & OTP Verification** — 6-digit email OTP verification, password recovery, and encrypted sessions
 * 🛡️ **Zero-Storage Privacy Architecture** — video frames never leave volatile browser memory
 
 ---
@@ -48,14 +51,20 @@
 - 🎨 **Original Pose Vector Artworks**: Dynamic visual art with target alignment vector indicators and anatomical focus areas.
 - 🔍 **Pose Details & Safety Checks**: Deep breakdown of entry steps, contraindications, Sanskrit names, and biomechanical targets.
 
-### 📊 4. Dynamic Live Session Reports
-- 📈 **No Default or Mock Templates**: Reports are generated strictly from the poses practiced in your live session.
+### 📊 4. Dynamic Live Session Reports & Email Dispatch
+- 📈 **Real-Time Session Reports**: Comprehensive summaries generated directly from the poses practiced in your live session.
 - ⏱️ **Hold Time Analytics**: Detailed per-pose records showing longest hold, average alignment score, and calories burned.
-- 🩺 **Veda Biomechanical Breakdown**: Joint-by-joint strength and safety cues personalized to your specific session performance.
+- 🩺 **Biomechanical Breakdown**: Joint-by-joint strength and safety cues personalized to your specific session performance.
+- ✉️ **Automated Email Reports**: Send comprehensive post-session performance summaries directly to your inbox via SMTP.
 
-### 🥗 5. Holistic Health Profile & BMI Nutrition Planner
-- ⚖️ **Body Metric Calculation**: Automatic BMI assessment with individualized wellness recommendations.
-- 🥑 **Ayurvedic Nutritional Insights**: Targeted dietary advice, hydration reminders, and meal suggestions aligned with personal yoga goals.
+### 🔐 5. Robust Authentication & Account Recovery
+- 🔑 **Email OTP Verification**: 6-digit one-time passcodes sent directly to your inbox for secure signup confirmation.
+- 🔄 **Self-Service Password Reset**: Dedicated password recovery modal with token validation and security strength indicators.
+- 👤 **Health Profile & BMI Nutrition Planner**: Automatic BMI assessment with individualized dietary insights aligned with personal yoga goals.
+
+### 📱 6. PWA & Responsive Mobile Experience
+- 📲 **Progressive Web App (PWA)**: Installable on Desktop, iOS, and Android with custom offline caching and app manifests.
+- 🗂️ **Mobile Slide-Over Drawer**: Responsive navigation drawer providing access to pose spectra, biomechanics features, settings, and profile sanctuary.
 
 ---
 
@@ -84,7 +93,7 @@
  │             │ Volatile memory only               │               │
  │             ▼                                    ▼               │
  │  ┌────────────────────────────────────────────────────────────┐  │
- │  │      Veda Biomechanics Engine (Trigonometric Scoring)      │  │
+ │  │      Yoga Biomechanics Engine (Trigonometric Scoring)      │  │
  │  │         • Joint Vector Angles   • Hold Duration Timers     │  │
  │  │         • Stability Detection   • Audio Speech Feedback    │  │
  │  └──────────────────────────┬─────────────────────────────────┘  │
@@ -100,7 +109,9 @@
 ## 📁 Modular Directory Structure
 
 ```text
-├── index.html                            # Semantic HTML5 entry point
+├── index.html                            # Semantic HTML5 entry point & PWA metadata
+├── sw.js                                 # Progressive Web App service worker
+├── manifest.json                         # Web App Manifest for mobile/desktop install
 ├── package.json                          # Project dependencies & scripts
 ├── metadata.json                         # AI Studio application metadata
 ├── src/
@@ -109,7 +120,7 @@
 │   ├── types.ts                          # Strict TypeScript models & interfaces
 │   ├── index.css                         # Tailwind CSS v4 styling rules
 │   ├── components/
-│   │   ├── Navbar.tsx                    # Header with live status & navigation
+│   │   ├── Navbar.tsx                    # Header with slide-over mobile drawer & navigation
 │   │   ├── HeroSection.tsx               # Studio hero & quick launch CTA
 │   │   ├── LivePostureSession.tsx        # Live camera workspace & practice orchestrator
 │   │   ├── ViewportHUD.tsx               # Live camera HUD, alignment ring & score overlay
@@ -121,8 +132,10 @@
 │   │   ├── PreSessionOnboardingModal.tsx # Posture goals & experience questionnaire
 │   │   ├── SessionReportModal.tsx        # Dynamic post-practice performance report
 │   │   ├── UserProfileModal.tsx          # Health metrics, past sessions & BMI nutrition
-│   │   ├── AuthModal.tsx                 # Account registration & sign-in modal
-│   │   ├── BackendSettingsModal.tsx      # Python backend / Ngrok bridge configuration
+│   │   ├── AuthModal.tsx                 # Account registration, 6-digit OTP & sign-in modal
+│   │   ├── ResetPasswordModal.tsx        # Self-service password recovery modal
+│   │   ├── BackendSettingsModal.tsx      # Settings modal for backend endpoints & cache reset
+│   │   ├── PWAInstallButton.tsx          # In-app Progressive Web App install prompt
 │   │   ├── AmbientAudioPlayer.tsx        # Ambient sound synthesizer controls
 │   │   ├── AsanaSenseLogo.tsx            # SVG logo & brand identity
 │   │   ├── PoseVisualArtwork.tsx         # Vector pose alignment artworks
@@ -132,11 +145,12 @@
 │   │   └── Footer.tsx                    # Site directory, zero-storage promise & links
 │   ├── hooks/
 │   │   ├── usePoseLandmarker.ts          # Computer vision landmark tracking hook
-│   │   └── useVoiceController.ts         # Hands-free speech recognition hook
+│   │   ├── useVoiceController.ts         # Hands-free speech recognition hook
+│   │   └── useModalFocusTrap.ts          # Accessible keyboard focus trap for dialogs
 │   ├── utils/
 │   │   ├── ambientAudio.ts               # Web Audio API procedural sound engine
 │   │   ├── audioFeedback.ts              # Spoken audio cues & synthesized sound effects
-│   │   ├── apiClient.ts                  # Backend proxy and optional Ngrok connectivity
+│   │   ├── apiClient.ts                  # Backend proxy, auth headers & WebSocket bridge
 │   │   └── profileStorage.ts             # LocalStorage encrypted profile persistence
 │   ├── data/
 │   │   └── yogaPoses.ts                  # Master yoga database & biomechanical constraints
@@ -172,7 +186,6 @@
 4. **Production Build**:
    ```bash
    npm run build
-   npm run start
    ```
 
 ---
@@ -181,7 +194,7 @@
 
 * 🛡️ **In-Memory Camera Processing**: Video frames are analyzed frame-by-frame entirely inside volatile browser memory. 
 * 🚫 **No Video Recording**: Your webcam stream and microphone input are **never saved, recorded, or uploaded** to external servers.
-* 💾 **Local Data Ownership**: Practice history, preferences, and user profiles are stored locally in your browser storage.
+* 💾 **Local Data Ownership**: Practice history, preferences, and user profiles are stored securely in your browser storage.
 
 ---
 
