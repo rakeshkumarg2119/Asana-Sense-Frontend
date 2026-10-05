@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Download, Sparkles, X, Smartphone, CheckCircle2 } from 'lucide-react';
+import { Download, Smartphone, X, Sparkles } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 
 export const PWAInstallButton: React.FC<{ className?: string }> = ({ className = '' }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
 
-  // If already running as an installed PWA, hide the button
+  // If already running as an installed standalone PWA, hide the button
   if (isInstalled) {
     return null;
   }
@@ -17,11 +17,12 @@ export const PWAInstallButton: React.FC<{ className?: string }> = ({ className =
       <button
         type="button"
         onClick={install}
-        className={`px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-950/30 transition-all cursor-pointer border border-emerald-400/30 hover:scale-[1.02] active:scale-[0.98] ${className}`}
-        title="Install ASANA - SENSE as Desktop / Mobile App"
+        className={`install-app-btn relative flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200/80 text-stone-700 text-[11px] font-semibold transition cursor-pointer border border-stone-200 shadow-2xs group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${className}`}
+        title="Install ASANA - SENSE on this device"
+        aria-label="Install ASANA - SENSE App"
       >
-        <Download className="w-3.5 h-3.5 text-emerald-100" />
-        <span>Install App</span>
+        <Download className="w-3.5 h-3.5 text-stone-600 group-hover:translate-y-0.5 transition duration-200" aria-hidden="true" />
+        <span className="font-medium text-stone-700 hidden sm:inline">Install</span>
       </button>
     );
   }
@@ -33,11 +34,12 @@ export const PWAInstallButton: React.FC<{ className?: string }> = ({ className =
         <button
           type="button"
           onClick={() => setShowIOSGuide(true)}
-          className={`px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold flex items-center gap-1.5 border border-stone-700 transition cursor-pointer ${className}`}
+          className={`install-app-btn relative flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200/80 text-stone-700 text-[11px] font-semibold transition cursor-pointer border border-stone-200 shadow-2xs group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${className}`}
           title="Install on iPhone / iPad"
+          aria-label="Install on iPhone or iPad"
         >
-          <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Install App</span>
+          <Smartphone className="w-3.5 h-3.5 text-stone-600" aria-hidden="true" />
+          <span className="font-medium text-stone-700 hidden sm:inline">Install</span>
         </button>
 
         {showIOSGuide && (
@@ -46,7 +48,8 @@ export const PWAInstallButton: React.FC<{ className?: string }> = ({ className =
               <button
                 type="button"
                 onClick={() => setShowIOSGuide(false)}
-                className="absolute top-4 right-4 text-stone-400 hover:text-white transition"
+                className="absolute top-4 right-4 text-stone-400 hover:text-white transition cursor-pointer"
+                aria-label="Close install instructions"
               >
                 <X className="w-5 h-5" />
               </button>
