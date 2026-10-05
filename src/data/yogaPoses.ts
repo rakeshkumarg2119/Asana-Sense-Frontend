@@ -4,7 +4,9 @@
  * Primary data comes from MongoDB via API; this serves as fallback + types.
  */
 import type { YogaPose } from '../types';
-import { apiFetchPoses } from '../utils/apiClient';
+import { apiFetchPoses, getBackendUrl } from '../utils/apiClient';
+
+let _cachedPoses: YogaPose[] | null = null;
 
 // ── Fallback static data (used when API is unavailable) ─────────────────────
 
@@ -257,18 +259,20 @@ export const ALL_EIGHT_POSES = YOGA_POSES;
 
 // ── API-based fetch (primary data source) ────────────────────────────────────
 
-let _cachedPoses: YogaPose[] | null = null;
-
 export async function fetchPosesFromAPI(): Promise<YogaPose[]> {
   if (_cachedPoses) return _cachedPoses;
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) {
+    return YOGA_POSES;
+  }
   try {
     const poses = await apiFetchPoses();
     if (poses.length > 0) {
       _cachedPoses = poses;
       return poses;
     }
-  } catch (e) {
-    console.warn('[Poses] API fetch failed, using fallback data:', e);
+  } catch {
+    // Graceful fallback to static pose spectrum
   }
   return YOGA_POSES;
 }

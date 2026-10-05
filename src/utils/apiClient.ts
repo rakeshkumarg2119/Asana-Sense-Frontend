@@ -7,13 +7,32 @@ import type { UserProfile, YogaPose, PracticeSession, AuthResponse, SessionPoseR
 
 const BACKEND_URL_KEY = 'asana_backend_url';
 
+export function isLocalHostEnv(): boolean {
+  if (typeof window === 'undefined') return true;
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
+}
+
+export function hasConfiguredBackend(): boolean {
+  if (typeof window === 'undefined') return false;
+  const stored = localStorage.getItem(BACKEND_URL_KEY);
+  if (stored && stored.trim()) return true;
+  if (import.meta.env.VITE_API_BASE && import.meta.env.VITE_API_BASE.trim()) return true;
+  return isLocalHostEnv();
+}
+
 export function normalizeBackendUrl(rawUrl: string): string {
   let url = (rawUrl || '').trim();
-  if (!url) return import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+  if (!url) {
+    if (import.meta.env.VITE_API_BASE && import.meta.env.VITE_API_BASE.trim()) {
+      return import.meta.env.VITE_API_BASE.trim();
+    }
+    return isLocalHostEnv() ? 'http://localhost:8000' : '';
+  }
 
   // Add protocol if missing
   if (!/^https?:\/\//i.test(url)) {
-    if (url.includes('ngrok') || url.includes('.app') || url.includes('.io') || url.includes('.dev')) {
+    if (url.includes('ngrok') || url.includes('.app') || url.includes('.io') || url.includes('.dev') || url.includes('.run.app')) {
       url = `https://${url}`;
     } else {
       url = `http://${url}`;
@@ -29,7 +48,10 @@ export function getBackendUrl(): string {
   if (stored && stored.trim()) {
     return normalizeBackendUrl(stored.trim());
   }
-  return import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+  if (import.meta.env.VITE_API_BASE && import.meta.env.VITE_API_BASE.trim()) {
+    return normalizeBackendUrl(import.meta.env.VITE_API_BASE.trim());
+  }
+  return isLocalHostEnv() ? 'http://localhost:8000' : '';
 }
 
 export function setBackendUrl(url: string): void {
@@ -42,7 +64,7 @@ export function setBackendUrl(url: string): void {
 
 export function clearBackendUrl(): void {
   localStorage.removeItem(BACKEND_URL_KEY);
-  const defaultUrl = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+  const defaultUrl = isLocalHostEnv() ? 'http://localhost:8000' : '';
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('asana_backend_changed', { detail: { url: defaultUrl } }));
   }
@@ -177,33 +199,48 @@ export interface BackendStatusReport {
 }
 
 export async function checkBackendConnection(targetUrl?: string): Promise<BackendStatusReport> {
-  const rawUrl = targetUrl || getBackendUrl();
+  const rawUrl = targetUrl !== undefined ? targetUrl : getBackendUrl();
   const apiUrl = normalizeBackendUrl(rawUrl);
-  const wsUrl = getWsBase(apiUrl);
+  const wsUrl = apiUrl ? getWsBase(apiUrl) : '';
   const isNgrok = apiUrl.includes('ngrok');
   const startTime = performance.now();
 
-  // 1. Try server-side bridge probe first (bypasses browser CORS & Ngrok interstitial page)
-  try {
-    const probeRes = await fetch(`/api/test-backend-bridge?url=${encodeURIComponent(apiUrl)}`);
-    if (probeRes.ok) {
-      const data = await probeRes.json();
-      return {
-        connected: Boolean(data.connected),
-        httpStatus: data.httpStatus,
-        latencyMs: data.latencyMs || Math.round(performance.now() - startTime),
-        apiUrl,
-        wsUrl,
-        message: data.message || data.diagnosis || (data.connected ? 'Connected' : 'Offline'),
-        isNgrok,
-        serverInfo: data.serverType,
-        diagnosis: data.diagnosis,
-        fixTip: data.fixTip,
-        testedAt: new Date().toLocaleTimeString(),
-      };
+  if (!apiUrl) {
+    return {
+      connected: false,
+      httpStatus: 0,
+      latencyMs: 0,
+      apiUrl: '',
+      wsUrl: '',
+      message: 'No backend URL configured. Enter your live server URL above.',
+      isNgrok: false,
+      testedAt: new Date().toLocaleTimeString(),
+    };
+  }
+
+  // 1. Try server-side bridge probe only in dev/local environments where express server exists
+  if (isLocalHostEnv()) {
+    try {
+      const probeRes = await fetch(`/api/test-backend-bridge?url=${encodeURIComponent(apiUrl)}`);
+      if (probeRes.ok) {
+        const data = await probeRes.json();
+        return {
+          connected: Boolean(data.connected),
+          httpStatus: data.httpStatus,
+          latencyMs: data.latencyMs || Math.round(performance.now() - startTime),
+          apiUrl,
+          wsUrl,
+          message: data.message || data.diagnosis || (data.connected ? 'Connected' : 'Offline'),
+          isNgrok,
+          serverInfo: data.serverType,
+          diagnosis: data.diagnosis,
+          fixTip: data.fixTip,
+          testedAt: new Date().toLocaleTimeString(),
+        };
+      }
+    } catch {
+      // Fall back to direct browser fetch
     }
-  } catch {
-    // Fall back to direct browser fetch
   }
 
   // 2. Direct browser fetch fallback
@@ -674,9 +711,20 @@ export const updateProfileOnAPI = apiUpdateProfile;
  */
 export async function apiForgotPassword(email: string): Promise<{ success: boolean; message: string }> {
   const cleanEmail = email.trim().toLowerCase();
+  const currentOrigin = typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('localhost:3000') && !window.location.origin.includes('127.0.0.1')
+    ? window.location.origin
+    : (typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'https://asana-sense-ai.vercel.app');
+  
   return await apiFetch<{ success: boolean; message: string }>('/api/auth/forgot-password', {
     method: 'POST',
-    body: JSON.stringify({ email: cleanEmail }),
+    body: JSON.stringify({
+      email: cleanEmail,
+      origin: currentOrigin,
+      redirect_url: `${currentOrigin}/?mode=reset-password`,
+      frontend_url: currentOrigin,
+      app_url: currentOrigin,
+      domain: currentOrigin,
+    }),
   });
 }
 

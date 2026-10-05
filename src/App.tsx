@@ -38,7 +38,11 @@ export default function App() {
   const [isNotFound, setIsNotFound] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const path = window.location.pathname.toLowerCase().trim();
-      return path !== '/' && path !== '' && path !== '/index.html';
+      const validExact = ['/', '', '/index.html', '/reset-password', '/reset_password', '/auth/reset-password', '/session', '/home'];
+      if (validExact.includes(path) || path.startsWith('/reset-password') || path.startsWith('/auth') || path.startsWith('/?')) {
+        return false;
+      }
+      return true;
     }
     return false;
   });
@@ -126,18 +130,40 @@ export default function App() {
   const [mobileNoticeModalOpen, setMobileNoticeModalOpen] = useState(false);
   const [mobileNoticePoseName, setMobileNoticePoseName] = useState<string | undefined>(undefined);
 
-  // Check URL query parameters for direct password reset link (?mode=reset-password&token=...&email=...)
+  // Check URL parameters, hash, or path for direct password reset links
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const modeParam = params.get('mode');
-      const tokenParam = params.get('token');
-      const emailParam = params.get('email');
-      if (modeParam === 'reset-password' || tokenParam) {
-        if (tokenParam) setResetPasswordToken(tokenParam);
-        if (emailParam) setResetPasswordEmail(emailParam);
+    if (typeof window === 'undefined') return;
+
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      let hashString = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+      if (hashString.includes('?')) {
+        hashString = hashString.split('?')[1];
+      }
+      const hashParams = new URLSearchParams(hashString);
+
+      const token = searchParams.get('token') || 
+                    searchParams.get('reset_token') || 
+                    searchParams.get('reset-token') || 
+                    hashParams.get('token') || 
+                    hashParams.get('reset_token');
+
+      const email = searchParams.get('email') || 
+                    searchParams.get('user_email') || 
+                    hashParams.get('email') || 
+                    hashParams.get('user_email');
+
+      const mode = searchParams.get('mode') || hashParams.get('mode');
+      const pathname = window.location.pathname.toLowerCase();
+      const isResetPath = pathname.includes('reset-password') || pathname.includes('reset_password');
+
+      if (token || mode === 'reset-password' || isResetPath) {
+        if (token) setResetPasswordToken(token);
+        if (email) setResetPasswordEmail(email);
         setResetPasswordModalOpen(true);
       }
+    } catch (e) {
+      console.warn('[App] URL reset password parse error:', e);
     }
   }, []);
 
