@@ -18,7 +18,7 @@ import {
 import { UserProfile } from '../types';
 import { AsanaSenseLogo } from './AsanaSenseLogo';
 import { PWAInstallButton } from './PWAInstallButton';
-import { getBackendUrl } from '../utils/apiClient';
+import { getBackendUrl, apiHealthCheck, hasConfiguredBackend } from '../utils/apiClient';
 
 interface NavbarProps {
   userProfile: UserProfile | null;
@@ -37,19 +37,34 @@ export const Navbar: React.FC<NavbarProps> = ({
   onScrollToSection,
 }) => {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  const [isNgrokActive, setIsNgrokActive] = useState<boolean>(() => {
-    const url = getBackendUrl();
-    return url.includes('ngrok') || !url.includes('localhost');
-  });
+  const [isBackendOnline, setIsBackendOnline] = useState<boolean>(false);
 
   useEffect(() => {
+    let isMounted = true;
+    const checkStatus = async () => {
+      if (!hasConfiguredBackend()) {
+        if (isMounted) setIsBackendOnline(false);
+        return;
+      }
+      try {
+        const online = await apiHealthCheck();
+        if (isMounted) setIsBackendOnline(online);
+      } catch {
+        if (isMounted) setIsBackendOnline(false);
+      }
+    };
+
+    checkStatus();
+
     const handleBackendChange = () => {
-      const url = getBackendUrl();
-      setIsNgrokActive(url.includes('ngrok') || !url.includes('localhost'));
+      checkStatus();
     };
 
     window.addEventListener('asana_backend_changed', handleBackendChange);
-    return () => window.removeEventListener('asana_backend_changed', handleBackendChange);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('asana_backend_changed', handleBackendChange);
+    };
   }, []);
 
   // Close drawer on Escape key and handle body scroll lock
@@ -149,10 +164,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
               <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
                 <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isNgrokActive ? 'bg-emerald-400' : 'bg-amber-400'
+                  isBackendOnline ? 'bg-emerald-400' : 'bg-amber-400'
                 }`} />
                 <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
-                  isNgrokActive ? 'bg-emerald-500' : 'bg-amber-500'
+                  isBackendOnline ? 'bg-emerald-500' : 'bg-amber-500'
                 }`} />
               </span>
             </button>
@@ -330,10 +345,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                           <span>Settings</span>
                           <span className="relative flex h-2 w-2">
                             <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                              isNgrokActive ? 'bg-emerald-400' : 'bg-amber-400'
+                              isBackendOnline ? 'bg-emerald-400' : 'bg-amber-400'
                             }`} />
                             <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                              isNgrokActive ? 'bg-emerald-500' : 'bg-amber-500'
+                              isBackendOnline ? 'bg-emerald-500' : 'bg-amber-500'
                             }`} />
                           </span>
                         </div>

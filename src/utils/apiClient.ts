@@ -93,15 +93,33 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-function authHeaders(): Record<string, string> {
+function isPublicEndpoint(path: string): boolean {
+  const publicPaths = [
+    '/api/auth/signin',
+    '/api/auth/login',
+    '/api/auth/send-otp',
+    '/api/auth/verify-otp',
+    '/api/auth/resend-otp',
+    '/api/auth/forgot-password',
+    '/api/auth/reset-password',
+    '/api/health',
+    '/',
+  ];
+  return publicPaths.some((p) => path === p || path.startsWith(p + '?'));
+}
+
+function authHeaders(path?: string): Record<string, string> {
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'ngrok-skip-browser-warning': 'true',
     'bypass-tunnel-reminder': 'true',
   };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (path && isPublicEndpoint(path)) {
+    return headers;
+  }
+  if (token && token.trim() && token !== 'undefined' && token !== 'null') {
+    headers['Authorization'] = `Bearer ${token.trim()}`;
   }
   return headers;
 }
@@ -116,7 +134,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     res = await fetch(url, {
       ...options,
       headers: {
-        ...authHeaders(),
+        ...authHeaders(path),
         ...(options.headers || {}),
       },
     });
@@ -133,7 +151,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 
     try {
       const body = await res.json();
-      errorDetail = body.detail ?? body.message;
+      errorDetail = body.detail ?? body.message ?? body.error;
 
       if (Array.isArray(body.detail)) {
         // FastAPI 422 validation errors array: [{ msg: "...", loc: [...] }]
@@ -147,30 +165,37 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
       }
     } catch {
       // Non-JSON response fallback
-      if (res.status === 503) {
-        errorMsg = 'Email service or backend temporarily unavailable. Please try again later.';
-      } else if (res.status === 429) {
-        errorMsg = 'Too many requests. Please wait before trying again.';
+      if (res.status === 401) {
+        errorMsg = 'Invalid email or password. Please verify your credentials.';
+      } else if (res.status === 403) {
+        errorMsg = 'Access denied or account deactivated.';
+      } else if (res.status === 404) {
+        errorMsg = 'Requested service endpoint not found.';
       } else if (res.status === 409) {
         errorMsg = 'This email is already registered. Please sign in.';
+      } else if (res.status === 429) {
+        errorMsg = 'Too many requests. Please wait a moment before trying again.';
+      } else if (res.status === 502 || res.status === 503 || res.status === 504) {
+        errorMsg = 'Server is currently offline or warming up from a cold start. Please try again shortly.';
       } else {
-        errorMsg = res.statusText || `Server error (${res.status})`;
+        errorMsg = res.statusText || `Server returned error (${res.status})`;
       }
     }
 
     if (res.status === 401) {
+      if (!errorDetail) {
+        errorMsg = 'Invalid email or password. Please verify your credentials.';
+      }
       clearToken();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('asana_auth_expired', { detail: { message: errorMsg } }));
       }
     } else if (res.status === 403) {
-      errorMsg = 'Account deactivated';
+      errorMsg = errorDetail || 'Access denied or account deactivated';
     } else if (res.status === 429) {
-      errorMsg = 'Too many requests, wait a minute';
-    }
-
-    if (res.status === 503 && !errorDetail) {
-      errorMsg = 'Email service temporarily unavailable. Please try again later.';
+      errorMsg = errorDetail || 'Too many requests, wait a minute';
+    } else if ((res.status === 502 || res.status === 503 || res.status === 504) && !errorDetail) {
+      errorMsg = 'Server is currently offline or warming up from a cold start. Please try again shortly.';
     }
 
     const apiError: any = new Error(errorMsg);
@@ -275,7 +300,7 @@ export async function checkBackendConnection(targetUrl?: string): Promise<Backen
     clearTimeout(timeoutId);
     const latencyMs = Math.round(performance.now() - startTime);
 
-    if (res && (res.ok || res.status < 500)) {
+    if (res && res.ok) {
       let serverInfo = res.headers.get('server') || 'FastAPI / Python Service';
       try {
         const json = await res.json();
@@ -299,7 +324,14 @@ export async function checkBackendConnection(targetUrl?: string): Promise<Backen
       };
     } else {
       let fixTip = '';
-      if (res?.status === 400) {
+      let message = `Server returned HTTP ${res?.status || 500} on ${endpointTried}`;
+
+      if (res?.status === 404) {
+        message = '404 Not Found. Ensure this URL points to your Python FastAPI backend, not the static frontend.';
+        fixTip = 'Enter your active Render or Ngrok backend URL in Settings (e.g., https://your-backend.onrender.com).';
+      } else if (res?.status === 401 || res?.status === 403) {
+        message = `Unauthorized (${res?.status}). Backend endpoint requires valid authorization.`;
+      } else if (res?.status === 400) {
         fixTip = 'Restart ngrok with: "ngrok http 8000 --host-header=rewrite" to prevent host rejection.';
       }
 
@@ -309,7 +341,7 @@ export async function checkBackendConnection(targetUrl?: string): Promise<Backen
         latencyMs,
         apiUrl,
         wsUrl,
-        message: `Server returned HTTP ${res?.status || 500} on ${endpointTried}`,
+        message,
         fixTip,
         isNgrok,
         testedAt: new Date().toLocaleTimeString(),
@@ -573,10 +605,22 @@ export async function apiResendOtp(email: string): Promise<{ success: boolean; m
 export async function apiSignIn(email: string, password: string): Promise<AuthResponse> {
   const cleanEmail = email.trim().toLowerCase();
 
-  const data = await apiFetch<AuthResponse>('/api/auth/signin', {
-    method: 'POST',
-    body: JSON.stringify({ email: cleanEmail, password }),
-  });
+  let data: AuthResponse;
+  try {
+    data = await apiFetch<AuthResponse>('/api/auth/signin', {
+      method: 'POST',
+      body: JSON.stringify({ email: cleanEmail, password }),
+    });
+  } catch (err: any) {
+    if (err?.status === 404) {
+      data = await apiFetch<AuthResponse>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: cleanEmail, password }),
+      });
+    } else {
+      throw err;
+    }
+  }
 
   if (data.token) setToken(data.token);
   if (data.user) {
@@ -941,12 +985,53 @@ export function sendLandmarks(
 }
 
 export async function apiHealthCheck(): Promise<boolean> {
-  try {
-    const data = await apiFetch<{ status: string }>('/api/health');
-    return data.status === 'ok';
-  } catch {
+  const baseUrl = getBackendUrl();
+  if (!baseUrl) {
     return false;
   }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const res = await fetch(`${baseUrl}/api/health?ngrok-skip-browser-warning=true`, {
+      method: 'GET',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+        'bypass-tunnel-reminder': 'true',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      try {
+        const body = await res.json();
+        if (typeof body === 'object' && body !== null) {
+          if (body.status === false || body.connected === false) return false;
+        }
+        return true;
+      } catch {
+        return true;
+      }
+    }
+  } catch {
+    // Try root endpoint as fallback
+    try {
+      const rootController = new AbortController();
+      const rootTimeout = setTimeout(() => rootController.abort(), 3500);
+      const rootRes = await fetch(`${baseUrl}/?ngrok-skip-browser-warning=true`, {
+        method: 'GET',
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+        signal: rootController.signal,
+      });
+      clearTimeout(rootTimeout);
+      return rootRes.ok;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 // ── FastAPI Biomechanics Session Report Generator ────────────────────────────

@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+  <a href="https://asana-sense-ai.vercel.app"><img src="https://img.shields.io/badge/Production-asana--sense--ai.vercel.app-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel Live" /></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-19.0-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React 19" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.8-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-v4.0-38BDF8?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS v4" /></a>
@@ -110,8 +111,11 @@
 
 ```text
 ├── index.html                            # Semantic HTML5 entry point & PWA metadata
-├── sw.js                                 # Progressive Web App service worker
-├── manifest.json                         # Web App Manifest for mobile/desktop install
+├── vercel.json                           # SPA router configuration for Vercel production
+├── public/
+│   ├── _redirects                        # Universal SPA rewrites for static hosting
+│   ├── manifest.json                     # Web App Manifest for mobile/desktop install
+│   └── sw.js                             # Progressive Web App service worker
 ├── package.json                          # Project dependencies & scripts
 ├── metadata.json                         # AI Studio application metadata
 ├── src/
@@ -146,7 +150,8 @@
 │   ├── hooks/
 │   │   ├── usePoseLandmarker.ts          # Computer vision landmark tracking hook
 │   │   ├── useVoiceController.ts         # Hands-free speech recognition hook
-│   │   └── useModalFocusTrap.ts          # Accessible keyboard focus trap for dialogs
+│   │   ├── useModalFocusTrap.ts          # Accessible keyboard focus trap for dialogs
+│   │   └── usePWAInstall.ts              # Progressive Web App installation hook
 │   ├── utils/
 │   │   ├── ambientAudio.ts               # Web Audio API procedural sound engine
 │   │   ├── audioFeedback.ts              # Spoken audio cues & synthesized sound effects
@@ -159,13 +164,12 @@
 
 ---
 
-## 🚀 Quick Start Guide
+## 🚀 Quick Start & Deployment
 
-### Prerequisites
-- **Node.js**: `v18.0.0` or higher
-- **Package Manager**: `npm` (v9+) or `bun` / `pnpm`
+### Production URL
+* 🌐 **Live Website**: [https://asana-sense-ai.vercel.app](https://asana-sense-ai.vercel.app)
 
-### Installation & Run
+### Local Development
 
 1. **Clone or open the project folder**:
    ```bash

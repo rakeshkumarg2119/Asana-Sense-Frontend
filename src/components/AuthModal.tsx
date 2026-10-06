@@ -25,7 +25,8 @@ import {
   apiResendOtp, 
   apiOAuthGoogle,
   apiForgotPassword,
-  checkBackendConnection 
+  checkBackendConnection,
+  apiHealthCheck 
 } from '../utils/apiClient';
 import { AsanaSenseLogo } from './AsanaSenseLogo';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
@@ -64,6 +65,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [isServerOffline, setIsServerOffline] = useState<boolean>(false);
+  const [autoPollAttempts, setAutoPollAttempts] = useState<number>(0);
   const [isRetrying, setIsRetrying] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -77,8 +79,41 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setErrorStatus(null);
     setSuccessMessage(null);
     setIsServerOffline(false);
+    setAutoPollAttempts(0);
     setOtpDigits(['', '', '', '', '', '']);
   }, [initialMode, isOpen]);
+
+  // Auto-reconnect polling in AuthModal when server is offline
+  useEffect(() => {
+    if (!isOpen || !isServerOffline) {
+      setAutoPollAttempts(0);
+      return;
+    }
+
+    let isSubscribed = true;
+    const intervalId = setInterval(async () => {
+      try {
+        const isOnline = await apiHealthCheck();
+        if (isOnline && isSubscribed) {
+          clearInterval(intervalId);
+          setIsServerOffline(false);
+          setError(null);
+          setAutoPollAttempts(0);
+        } else if (isSubscribed) {
+          setAutoPollAttempts((prev) => prev + 1);
+        }
+      } catch {
+        if (isSubscribed) {
+          setAutoPollAttempts((prev) => prev + 1);
+        }
+      }
+    }, 3500);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(intervalId);
+    };
+  }, [isOpen, isServerOffline]);
 
   // Resend OTP countdown timer (30s cooldown per checklist)
   useEffect(() => {
@@ -171,11 +206,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setErrorStatus(status || null);
         const msg = err?.message || 'Authentication failed.';
 
-        if (err?.isOffline || msg.toLowerCase().includes('offline') || msg.toLowerCase().includes('unreachable') || msg.toLowerCase().includes('fetch')) {
+        const isOfflineLike =
+          err?.isOffline ||
+          status === 0 ||
+          status === 404 ||
+          status === 500 ||
+          status === 502 ||
+          status === 503 ||
+          status === 504 ||
+          msg.toLowerCase().includes('offline') ||
+          msg.toLowerCase().includes('unreachable') ||
+          msg.toLowerCase().includes('fetch') ||
+          msg.toLowerCase().includes('authorization') ||
+          msg.toLowerCase().includes('server error') ||
+          msg.toLowerCase().includes('unavailable');
+
+        if (isOfflineLike) {
           setIsServerOffline(true);
-          setError('Server is currently offline / unreachable. Please ensure the backend is running. Once fixed, see you soon!');
-        } else if (status === 503) {
-          setError('Email service or backend temporarily unavailable. Please try again later.');
+          setError(null);
+        } else if (status === 401) {
+          setError('Invalid email or password. Please verify your credentials and try again.');
         } else {
           setError(msg);
         }
@@ -208,13 +258,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setErrorStatus(status || null);
         const msg = err?.message || 'Failed to dispatch verification email.';
 
-        if (err?.isOffline || msg.toLowerCase().includes('offline') || msg.toLowerCase().includes('unreachable') || msg.toLowerCase().includes('fetch')) {
+        const isOfflineLike =
+          err?.isOffline ||
+          status === 0 ||
+          status === 404 ||
+          status === 500 ||
+          status === 502 ||
+          status === 503 ||
+          status === 504 ||
+          msg.toLowerCase().includes('offline') ||
+          msg.toLowerCase().includes('unreachable') ||
+          msg.toLowerCase().includes('fetch') ||
+          msg.toLowerCase().includes('authorization') ||
+          msg.toLowerCase().includes('server error') ||
+          msg.toLowerCase().includes('unavailable');
+
+        if (isOfflineLike) {
           setIsServerOffline(true);
-          setError('Server is currently offline / unreachable. Please ensure the backend is running. Once fixed, see you soon!');
+          setError(null);
         } else if (status === 409) {
           setError('This email is already registered. Please sign in instead.');
-        } else if (status === 503) {
-          setError('Email service temporarily unavailable. Please try again later.');
         } else {
           setError(msg);
         }
@@ -243,17 +306,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setMode('forgot_password_success');
       setSuccessMessage(`Password reset link has been dispatched to ${cleanEmail}`);
     } catch (err: any) {
+      const status = err?.status;
       const msg = err?.message || 'Failed to send reset link.';
-      if (err?.isOffline || msg.toLowerCase().includes('offline') || msg.toLowerCase().includes('unreachable') || msg.toLowerCase().includes('fetch')) {
+      const isOfflineLike =
+        err?.isOffline ||
+        status === 0 ||
+        status === 404 ||
+        status === 500 ||
+        status === 502 ||
+        status === 503 ||
+        status === 504 ||
+        msg.toLowerCase().includes('offline') ||
+        msg.toLowerCase().includes('unreachable') ||
+        msg.toLowerCase().includes('fetch') ||
+        msg.toLowerCase().includes('authorization') ||
+        msg.toLowerCase().includes('unavailable');
+
+      if (isOfflineLike) {
         setIsServerOffline(true);
-        setError('Server is currently offline / unreachable. Please ensure the backend is running. Once fixed, see you soon!');
+        setError(null);
       } else {
-        // Always 200 message in standard flow, but if 503 show try again later
-        if (err?.status === 503) {
-          setError('Email service temporarily unavailable. Please try again later.');
-        } else {
-          setError(msg);
-        }
+        setError(msg);
       }
     } finally {
       setIsSubmitting(false);
@@ -321,14 +394,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setErrorStatus(status || null);
       const msg = err?.message || 'Invalid or expired OTP code.';
 
-      if (err?.isOffline || msg.toLowerCase().includes('offline') || msg.toLowerCase().includes('unreachable') || msg.toLowerCase().includes('fetch')) {
+      const isOfflineLike =
+        err?.isOffline ||
+        status === 0 ||
+        status === 404 ||
+        status === 500 ||
+        status === 502 ||
+        status === 503 ||
+        status === 504 ||
+        msg.toLowerCase().includes('offline') ||
+        msg.toLowerCase().includes('unreachable') ||
+        msg.toLowerCase().includes('fetch') ||
+        msg.toLowerCase().includes('authorization') ||
+        msg.toLowerCase().includes('unavailable');
+
+      if (isOfflineLike) {
         setIsServerOffline(true);
-        setError('Server is currently offline / unreachable. Please ensure the backend is running. Once fixed, see you soon!');
+        setError(null);
       } else if (status === 429) {
         // 5 wrong codes burn the code
         setError('Too many wrong codes. Code burned. Please request a new verification code.');
-      } else if (status === 503) {
-        setError('Email service temporarily unavailable. Please try again later.');
       } else {
         // 400: wrong code, expired, or no pending signup -> show detail text
         setError(msg);
@@ -358,13 +443,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setErrorStatus(status || null);
       const msg = err?.message || 'Could not resend OTP.';
 
-      if (err?.isOffline || msg.toLowerCase().includes('offline') || msg.toLowerCase().includes('unreachable')) {
+      const isOfflineLike =
+        err?.isOffline ||
+        status === 0 ||
+        status === 404 ||
+        status === 500 ||
+        status === 502 ||
+        status === 503 ||
+        status === 504 ||
+        msg.toLowerCase().includes('offline') ||
+        msg.toLowerCase().includes('unreachable') ||
+        msg.toLowerCase().includes('authorization') ||
+        msg.toLowerCase().includes('unavailable');
+
+      if (isOfflineLike) {
         setIsServerOffline(true);
-        setError('Server is currently offline / unreachable. Please ensure the backend is running.');
+        setError(null);
       } else if (status === 429) {
         setError('Resend rate limit reached. Please wait before requesting another code.');
-      } else if (status === 503) {
-        setError('Email service temporarily unavailable. Please try again later.');
       } else {
         setError(msg);
       }
@@ -396,9 +492,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }, 700);
     } catch (err: any) {
       const msg = err?.message || `${provider} authentication failed.`;
-      if (msg.toLowerCase().includes('offline') || msg.toLowerCase().includes('unreachable') || msg.toLowerCase().includes('fetch')) {
+      const isOfflineLike =
+        err?.isOffline ||
+        msg.toLowerCase().includes('offline') ||
+        msg.toLowerCase().includes('unreachable') ||
+        msg.toLowerCase().includes('fetch') ||
+        msg.toLowerCase().includes('authorization') ||
+        msg.toLowerCase().includes('unavailable');
+
+      if (isOfflineLike) {
         setIsServerOffline(true);
-        setError('Server is currently offline / unreachable. Please start your backend server. Once fixed, see you soon!');
+        setError(null);
       } else {
         setError(msg);
       }
@@ -475,16 +579,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             {/* Server Offline Alert Banner */}
             {isServerOffline && (
-              <div className="mb-4 p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs space-y-2 animate-in fade-in">
-                <div className="flex items-start gap-2">
+              <div className="mb-4 p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs space-y-2.5 animate-in fade-in">
+                <div className="flex items-start gap-2.5">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <div className="font-bold text-amber-950">Server Unavailable</div>
+                    <div className="font-bold text-amber-950">Server is temporarily unavailable</div>
                     <p className="text-[11px] text-amber-800 leading-relaxed mt-0.5">
-                      Server is temporarily unavailable. We'll be back soon!
+                      We're having trouble connecting to the server right now. It may be temporarily offline or waking up.
                     </p>
                   </div>
                 </div>
+
+                {/* Auto-reconnect live status badge */}
+                <div className="bg-amber-100/70 border border-amber-300/80 rounded-xl px-2.5 py-1.5 flex items-center justify-between text-[11px] text-amber-900 font-medium">
+                  <span className="flex items-center gap-2">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-600"></span>
+                    </span>
+                    <span>Auto-checking server...</span>
+                  </span>
+                  {autoPollAttempts > 0 && (
+                    <span className="text-[10px] text-amber-700 opacity-80">{autoPollAttempts} checks</span>
+                  )}
+                </div>
+
                 <button
                   type="button"
                   onClick={handleRetryConnection}
@@ -492,7 +611,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   className="w-full py-2 px-3 rounded-xl bg-amber-200/90 hover:bg-amber-300 active:scale-98 font-bold text-amber-900 transition flex items-center justify-center gap-1.5 text-[11px] cursor-pointer"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isRetrying ? 'animate-spin' : ''}`} />
-                  <span>{isRetrying ? 'Checking connection...' : 'Retry Server Connection'}</span>
+                  <span>{isRetrying ? 'Checking connection...' : 'Retry Now'}</span>
                 </button>
               </div>
             )}

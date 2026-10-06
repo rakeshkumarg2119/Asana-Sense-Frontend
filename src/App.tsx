@@ -56,10 +56,47 @@ export default function App() {
   // Empty session notice toast
   const [emptySessionNotice, setEmptySessionNotice] = useState<string | null>(null);
 
-  // Backend offline modal state
+  // Backend offline modal state & background auto-recovery polling
   const [serverDownModalOpen, setServerDownModalOpen] = useState(false);
   const [isRetryingConnection, setIsRetryingConnection] = useState(false);
   const [pendingPoseAfterCheck, setPendingPoseAfterCheck] = useState<string | undefined>(undefined);
+  const [autoPollAttempts, setAutoPollAttempts] = useState(0);
+
+  // Background Auto-Polling when Server is Down (auto-closes modal & resumes practice upon recovery)
+  useEffect(() => {
+    if (!serverDownModalOpen) {
+      setAutoPollAttempts(0);
+      return;
+    }
+
+    let isSubscribed = true;
+    const intervalId = setInterval(async () => {
+      try {
+        const isOnline = await apiHealthCheck();
+        if (isOnline && isSubscribed) {
+          clearInterval(intervalId);
+          setServerDownModalOpen(false);
+          soundEngine.playChime(660, 0.8);
+          const poseToStart = pendingPoseAfterCheck;
+          setPendingPoseAfterCheck(undefined);
+          if (poseToStart !== undefined) {
+            handleInitiateSession(poseToStart);
+          }
+        } else if (isSubscribed) {
+          setAutoPollAttempts((prev) => prev + 1);
+        }
+      } catch {
+        if (isSubscribed) {
+          setAutoPollAttempts((prev) => prev + 1);
+        }
+      }
+    }, 3500);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(intervalId);
+    };
+  }, [serverDownModalOpen, pendingPoseAfterCheck]);
 
   // Auto-dismiss welcome toast after 8 seconds
   useEffect(() => {
@@ -750,8 +787,19 @@ export default function App() {
                 Server Unavailable
               </h3>
               <p className="text-xs text-stone-600 leading-relaxed font-medium">
-                Server is temporarily unavailable. We'll be back soon!
+                We're having trouble connecting to the server. It may be temporarily offline or warming up.
               </p>
+            </div>
+
+            {/* Live Auto-Polling Recovery Banner */}
+            <div className="bg-emerald-50/80 border border-emerald-200/90 rounded-2xl p-3 flex items-center justify-center gap-2.5 text-emerald-900 text-xs shadow-xs">
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <span className="font-medium text-left">
+                Auto-reconnecting every 3.5s... {autoPollAttempts > 0 && <span className="opacity-70 text-[10px]">({autoPollAttempts} checks)</span>}
+              </span>
             </div>
 
             <div className="grid grid-cols-2 gap-2.5 pt-1">
@@ -773,14 +821,14 @@ export default function App() {
                 className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition cursor-pointer shadow-md shadow-emerald-900/20 disabled:opacity-60 flex items-center justify-center gap-1.5"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? 'animate-spin' : ''}`} />
-                <span>{isRetryingConnection ? 'Testing...' : 'Retry Connection'}</span>
+                <span>{isRetryingConnection ? 'Testing...' : 'Retry Now'}</span>
               </button>
             </div>
 
             <button
               type="button"
               onClick={() => setServerDownModalOpen(false)}
-              className="text-xs text-stone-400 hover:text-stone-600 transition block mx-auto cursor-pointer"
+              className="text-xs text-stone-400 hover:text-stone-600 transition block mx-auto cursor-pointer pt-1"
             >
               Stay on Sanctuary Dashboard
             </button>
