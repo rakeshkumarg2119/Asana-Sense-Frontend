@@ -23,18 +23,22 @@ export function normalizeBackendUrl(rawUrl: string): string {
   let url = (rawUrl || '').trim();
   if (!url) {
     if (import.meta.env.VITE_API_BASE && import.meta.env.VITE_API_BASE.trim()) {
-      return import.meta.env.VITE_API_BASE.trim().replace(/\/+$/, '');
+      const envBase = import.meta.env.VITE_API_BASE.trim().replace(/\/+$/, '');
+      if (!envBase.includes('localhost') && !envBase.includes('127.0.0.1') && !envBase.includes('ngrok')) {
+        return envBase;
+      }
     }
+    return DEFAULT_PRODUCTION_BACKEND_URL;
+  }
+
+  // If URL contains localhost or ngrok, discard it in favor of the hosted server
+  if (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('ngrok')) {
     return DEFAULT_PRODUCTION_BACKEND_URL;
   }
 
   // Add protocol if missing
   if (!/^https?:\/\//i.test(url)) {
-    if (url.includes('ngrok') || url.includes('.app') || url.includes('.io') || url.includes('.dev') || url.includes('.run.app') || url.includes('onrender.com')) {
-      url = `https://${url}`;
-    } else {
-      url = `http://${url}`;
-    }
+    url = `https://${url}`;
   }
 
   // Remove trailing slashes
@@ -44,10 +48,16 @@ export function normalizeBackendUrl(rawUrl: string): string {
 export function getBackendUrl(): string {
   const stored = localStorage.getItem(BACKEND_URL_KEY);
   if (stored && stored.trim()) {
-    return normalizeBackendUrl(stored.trim());
+    const norm = normalizeBackendUrl(stored.trim());
+    if (norm && !norm.includes('localhost') && !norm.includes('127.0.0.1') && !norm.includes('ngrok')) {
+      return norm;
+    }
   }
   if (import.meta.env.VITE_API_BASE && import.meta.env.VITE_API_BASE.trim()) {
-    return normalizeBackendUrl(import.meta.env.VITE_API_BASE.trim());
+    const envBase = normalizeBackendUrl(import.meta.env.VITE_API_BASE.trim());
+    if (envBase && !envBase.includes('localhost') && !envBase.includes('127.0.0.1') && !envBase.includes('ngrok')) {
+      return envBase;
+    }
   }
   return DEFAULT_PRODUCTION_BACKEND_URL;
 }
@@ -112,8 +122,6 @@ function authHeaders(path?: string): Record<string, string> {
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'ngrok-skip-browser-warning': 'true',
-    'bypass-tunnel-reminder': 'true',
   };
   if (path && isPublicEndpoint(path)) {
     return headers;
@@ -237,38 +245,13 @@ export async function checkBackendConnection(targetUrl?: string): Promise<Backen
       latencyMs: 0,
       apiUrl: '',
       wsUrl: '',
-      message: 'No backend URL configured. Enter your live server URL above.',
+      message: 'No backend URL configured.',
       isNgrok: false,
       testedAt: new Date().toLocaleTimeString(),
     };
   }
 
-  // 1. Try server-side bridge probe only in dev/local environments where express server exists
-  if (isLocalHostEnv()) {
-    try {
-      const probeRes = await fetch(`/api/test-backend-bridge?url=${encodeURIComponent(apiUrl)}`);
-      if (probeRes.ok) {
-        const data = await probeRes.json();
-        return {
-          connected: Boolean(data.connected),
-          httpStatus: data.httpStatus,
-          latencyMs: data.latencyMs || Math.round(performance.now() - startTime),
-          apiUrl,
-          wsUrl,
-          message: data.message || data.diagnosis || (data.connected ? 'Connected' : 'Offline'),
-          isNgrok,
-          serverInfo: data.serverType,
-          diagnosis: data.diagnosis,
-          fixTip: data.fixTip,
-          testedAt: new Date().toLocaleTimeString(),
-        };
-      }
-    } catch {
-      // Fall back to direct browser fetch
-    }
-  }
-
-  // 2. Direct browser fetch fallback
+  // Direct browser fetch
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6500);
@@ -277,22 +260,14 @@ export async function checkBackendConnection(targetUrl?: string): Promise<Backen
     let endpointTried = '/api/health';
 
     try {
-      res = await fetch(`${apiUrl}/api/health?ngrok-skip-browser-warning=true`, {
+      res = await fetch(`${apiUrl}/api/health`, {
         method: 'GET',
-        headers: {
-          'ngrok-skip-browser-warning': 'true',
-          'bypass-tunnel-reminder': 'true',
-        },
         signal: controller.signal,
       });
     } catch {
       endpointTried = '/';
-      res = await fetch(`${apiUrl}/?ngrok-skip-browser-warning=true`, {
+      res = await fetch(`${apiUrl}/`, {
         method: 'GET',
-        headers: {
-          'ngrok-skip-browser-warning': 'true',
-          'bypass-tunnel-reminder': 'true',
-        },
         signal: controller.signal,
       });
     }
@@ -1000,12 +975,8 @@ export async function apiHealthCheck(): Promise<boolean> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-    const res = await fetch(`${baseUrl}/api/health?ngrok-skip-browser-warning=true`, {
+    const res = await fetch(`${baseUrl}/api/health`, {
       method: 'GET',
-      headers: {
-        'ngrok-skip-browser-warning': 'true',
-        'bypass-tunnel-reminder': 'true',
-      },
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -1026,9 +997,8 @@ export async function apiHealthCheck(): Promise<boolean> {
     try {
       const rootController = new AbortController();
       const rootTimeout = setTimeout(() => rootController.abort(), 3500);
-      const rootRes = await fetch(`${baseUrl}/?ngrok-skip-browser-warning=true`, {
+      const rootRes = await fetch(`${baseUrl}/`, {
         method: 'GET',
-        headers: { 'ngrok-skip-browser-warning': 'true' },
         signal: rootController.signal,
       });
       clearTimeout(rootTimeout);
