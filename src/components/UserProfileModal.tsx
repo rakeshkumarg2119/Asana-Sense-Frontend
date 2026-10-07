@@ -21,6 +21,7 @@ import {
 import { UserProfile, PracticeSession } from '../types';
 import { 
   getStoredSessions, 
+  fetchSessionsFromAPI,
   deleteStoredSession, 
   clearUserSessionData, 
   calculatePoseMasteryBadges, 
@@ -69,6 +70,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   // Sync sessions and name on modal open or user prop changes
   useEffect(() => {
     if (isOpen) {
+      // 1. Instantly display whatever is in storage
       try {
         const rawSessions = getStoredSessions() || [];
         const seen = new Set<string>();
@@ -84,6 +86,25 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       } catch (err) {
         console.warn('[ProfileModal] Error reading past sessions:', err);
       }
+
+      // 2. Fetch live session history from MongoDB backend
+      fetchSessionsFromAPI().then((liveSessions) => {
+        if (Array.isArray(liveSessions) && liveSessions.length > 0) {
+          const seen = new Set<string>();
+          const unique = liveSessions.filter((s) => {
+            const id = s.id || (s as any)._id || (s as any).start_time?.toString() || (s as any).startTime?.toString();
+            if (id) {
+              if (seen.has(id)) return false;
+              seen.add(id);
+            }
+            return true;
+          });
+          setPastSessions(unique);
+        }
+      }).catch((err) => {
+        console.warn('[ProfileModal] Remote sessions fetch notice:', err);
+      });
+
       setDeletingSessionId(null);
       setEditedName(user?.name || 'Practitioner');
       setIsEditingName(false);

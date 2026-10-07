@@ -59,9 +59,14 @@ export class ErrorBoundary extends Component<Props, State> {
               <button
                 type="button"
                 onClick={() => {
-                  window.location.href = '/';
+                  this.setState({ hasError: false, error: null });
+                  if (this.props.onReset) {
+                    this.props.onReset();
+                  } else {
+                    window.location.href = '/';
+                  }
                 }}
-                className="px-4 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold flex items-center gap-2 cursor-pointer transition"
+                className="px-4 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold flex items-center gap-2 cursor-pointer transition border border-stone-700"
               >
                 <Home className="w-4 h-4" />
                 Return to Dashboard

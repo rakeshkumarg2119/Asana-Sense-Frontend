@@ -122,6 +122,8 @@ export interface UserStats {
   total_minutes_practiced?: number;
   averageScore?: number;
   average_score?: number;
+  overallAccuracy?: number;
+  overall_accuracy?: number;
   favoritePose?: string;
   favorite_pose?: string;
 }

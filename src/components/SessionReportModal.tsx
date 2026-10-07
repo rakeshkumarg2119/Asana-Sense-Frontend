@@ -156,8 +156,8 @@ interface SessionReportModalProps {
   session: PracticeSession;
   userProfile: UserProfile | null;
   onClose: () => void;
-  onOpenAuth: () => void;
-  onRestartPractice: () => void;
+  onOpenAuth?: () => void;
+  onRestartPractice?: () => void;
   onReturnToSession?: () => void;
   onExitToDashboard?: () => void;
   previousSession?: PracticeSession | null;

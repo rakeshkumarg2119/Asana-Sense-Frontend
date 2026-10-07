@@ -282,8 +282,20 @@ export async function saveSessionRecord(session: PracticeSession): Promise<void>
       totalMinutesPracticed: totalMins,
       average_score: avgScore,
       averageScore: avgScore,
+      overall_accuracy: avgScore,
     };
     saveUserProfile(user);
+
+    // Sync cumulative stats to MongoDB user document
+    updateProfileOnAPI({
+      stats: user.stats,
+      total_sessions: totalSess,
+      total_minutes_practiced: totalMins,
+      average_score: avgScore,
+      overall_accuracy: avgScore,
+    }).catch((err) => {
+      console.warn('[profileStorage] Failed to sync profile stats to cloud:', err);
+    });
   }
 }
 
