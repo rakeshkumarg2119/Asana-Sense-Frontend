@@ -102,6 +102,8 @@ function isPublicEndpoint(path: string): boolean {
     '/api/auth/resend-otp',
     '/api/auth/forgot-password',
     '/api/auth/reset-password',
+    '/api/auth/oauth-google',
+    '/api/auth/oauth-microsoft',
     '/api/health',
     '/',
   ];
@@ -635,17 +637,22 @@ export async function apiSignIn(email: string, password: string): Promise<AuthRe
  * OAuth Login / Registration (Google Sign-In - already pre-verified by identity provider)
  * Route: POST /api/auth/oauth-google
  */
-export async function apiOAuthGoogle(credential: string, profile: { email: string; name: string; avatarUrl?: string }): Promise<AuthResponse> {
-  const data = await apiFetch<AuthResponse>('/api/auth/oauth-google', {
-    method: 'POST',
-    body: JSON.stringify({
-      credential,
-      email: profile.email.toLowerCase(),
-      name: profile.name,
-      avatar_url: profile.avatarUrl,
-    }),
-  });
+export async function apiOAuthGoogle(
+  credential: string,
+  _profile?: { email?: string; name?: string; avatarUrl?: string },
+): Promise<AuthResponse> {
+  return finishOAuth('/api/auth/oauth-google', credential);
+}
 
+export async function apiOAuthMicrosoft(idToken: string): Promise<AuthResponse> {
+  return finishOAuth('/api/auth/oauth-microsoft', idToken);
+}
+
+async function finishOAuth(path: string, credential: string): Promise<AuthResponse> {
+  const data = await apiFetch<AuthResponse>(path, {
+    method: 'POST',
+    body: JSON.stringify({ credential }),
+  });
   if (data.token) setToken(data.token);
   if (data.user) {
     applyStoredCustomName(data.user);
@@ -653,6 +660,7 @@ export async function apiOAuthGoogle(credential: string, profile: { email: strin
   }
   return data;
 }
+
 
 export async function apiGetMe(): Promise<{ success: boolean; user: UserProfile }> {
   try {

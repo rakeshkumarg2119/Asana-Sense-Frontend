@@ -30,6 +30,12 @@ import {
   normalizeBackendUrl,
   clearAllLocalStorage
 } from '../utils/apiClient';
+import { 
+  getGoogleClientId, 
+  setGoogleClientId, 
+  getMicrosoftClientId, 
+  setMicrosoftClientId 
+} from '../utils/oauthClient';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 
 interface BackendSettingsModalProps {
@@ -43,6 +49,8 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
 }) => {
   const containerRef = useModalFocusTrap({ isOpen, onClose });
   const [inputUrl, setInputUrl] = useState<string>('');
+  const [googleId, setGoogleId] = useState<string>('');
+  const [microsoftId, setMicrosoftId] = useState<string>('');
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [statusReport, setStatusReport] = useState<BackendStatusReport | null>(null);
   const [wsTestResult, setWsTestResult] = useState<{ tested: boolean; success: boolean; latencyMs?: number; message?: string } | null>(null);
@@ -50,11 +58,13 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
   const [hasSaved, setHasSaved] = useState<boolean>(false);
   const [storageCleared, setStorageCleared] = useState<boolean>(false);
 
-  // Load current URL on modal open
+  // Load current URL and OAuth client IDs on modal open
   useEffect(() => {
     if (isOpen) {
       const current = getBackendUrl();
       setInputUrl(current);
+      setGoogleId(getGoogleClientId());
+      setMicrosoftId(getMicrosoftClientId());
       setHasSaved(false);
       setStorageCleared(false);
       // Run quick status check
@@ -109,6 +119,8 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
   const handleSaveAndApply = () => {
     if (!inputUrl.trim()) return;
     setBackendUrl(inputUrl);
+    setGoogleClientId(googleId);
+    setMicrosoftClientId(microsoftId);
     setHasSaved(true);
     setTimeout(() => {
       onClose();
@@ -259,6 +271,44 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
                 <Radio className="w-3 h-3 text-emerald-600" />
                 Ngrok Tunnel
               </button>
+            </div>
+          </div>
+
+          {/* OAuth Identity Client IDs Section */}
+          <div className="space-y-4 pt-4 border-t border-stone-200">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-stone-800 uppercase tracking-wider">
+                OAuth Client IDs (Optional / Environment)
+              </label>
+              <span className="text-[10px] text-stone-400 font-mono">.env: VITE_GOOGLE_CLIENT_ID</span>
+            </div>
+
+            {/* Google Client ID */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-semibold text-stone-700">
+                Google OAuth Client ID
+              </label>
+              <input
+                type="text"
+                value={googleId}
+                onChange={(e) => setGoogleId(e.target.value)}
+                placeholder="e.g. xxxxx.apps.googleusercontent.com"
+                className="w-full px-3.5 py-2.5 bg-stone-50 hover:bg-stone-100/80 focus:bg-white border border-stone-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 rounded-xl text-xs font-mono text-stone-800 transition outline-none"
+              />
+            </div>
+
+            {/* Microsoft Client ID */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-semibold text-stone-700">
+                Microsoft OAuth Client ID
+              </label>
+              <input
+                type="text"
+                value={microsoftId}
+                onChange={(e) => setMicrosoftId(e.target.value)}
+                placeholder="e.g. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full px-3.5 py-2.5 bg-stone-50 hover:bg-stone-100/80 focus:bg-white border border-stone-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 rounded-xl text-xs font-mono text-stone-800 transition outline-none"
+              />
             </div>
           </div>
         </div>

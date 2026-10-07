@@ -24,10 +24,12 @@ import {
   apiVerifyOtp, 
   apiResendOtp, 
   apiOAuthGoogle,
+  apiOAuthMicrosoft,
   apiForgotPassword,
   checkBackendConnection,
   apiHealthCheck 
 } from '../utils/apiClient';
+import { promptGoogleOAuth, promptMicrosoftOAuth } from '../utils/oauthClient';
 import { AsanaSenseLogo } from './AsanaSenseLogo';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 
@@ -476,16 +478,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setErrorStatus(null);
     setIsServerOffline(false);
 
-    const demoEmail = provider === 'Google' ? 'verified.google@gmail.com' : 'verified.microsoft@outlook.com';
-    const demoName = provider === 'Google' ? 'Google Practitioner' : 'Microsoft Practitioner';
-
     try {
-      const res = await apiOAuthGoogle('social_credential_verified', {
-        email: demoEmail,
-        name: demoName,
-      });
+      let credential = '';
+      if (provider === 'Google') {
+        credential = await promptGoogleOAuth();
+      } else {
+        credential = await promptMicrosoftOAuth();
+      }
 
-      setSuccessMessage(`🎉 Signed in with ${provider}! Welcome, ${res.user.name}.`);
+      const res = provider === 'Google'
+        ? await apiOAuthGoogle(credential)
+        : await apiOAuthMicrosoft(credential);
+
+      setSuccessMessage(`🎉 Signed in with ${provider}! Welcome, ${res.user.name || 'Practitioner'}.`);
       setTimeout(() => {
         onAuthSuccess(res.user, false);
         onClose();
