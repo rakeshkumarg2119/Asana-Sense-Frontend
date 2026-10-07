@@ -13,26 +13,24 @@ export function isLocalHostEnv(): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
 }
 
+export const DEFAULT_PRODUCTION_BACKEND_URL = 'https://asana-sense-api.onrender.com';
+
 export function hasConfiguredBackend(): boolean {
-  if (typeof window === 'undefined') return false;
-  const stored = localStorage.getItem(BACKEND_URL_KEY);
-  if (stored && stored.trim()) return true;
-  if (import.meta.env.VITE_API_BASE && import.meta.env.VITE_API_BASE.trim()) return true;
-  return isLocalHostEnv();
+  return true;
 }
 
 export function normalizeBackendUrl(rawUrl: string): string {
   let url = (rawUrl || '').trim();
   if (!url) {
     if (import.meta.env.VITE_API_BASE && import.meta.env.VITE_API_BASE.trim()) {
-      return import.meta.env.VITE_API_BASE.trim();
+      return import.meta.env.VITE_API_BASE.trim().replace(/\/+$/, '');
     }
-    return isLocalHostEnv() ? 'http://localhost:8000' : '';
+    return DEFAULT_PRODUCTION_BACKEND_URL;
   }
 
   // Add protocol if missing
   if (!/^https?:\/\//i.test(url)) {
-    if (url.includes('ngrok') || url.includes('.app') || url.includes('.io') || url.includes('.dev') || url.includes('.run.app')) {
+    if (url.includes('ngrok') || url.includes('.app') || url.includes('.io') || url.includes('.dev') || url.includes('.run.app') || url.includes('onrender.com')) {
       url = `https://${url}`;
     } else {
       url = `http://${url}`;
@@ -51,7 +49,7 @@ export function getBackendUrl(): string {
   if (import.meta.env.VITE_API_BASE && import.meta.env.VITE_API_BASE.trim()) {
     return normalizeBackendUrl(import.meta.env.VITE_API_BASE.trim());
   }
-  return isLocalHostEnv() ? 'http://localhost:8000' : '';
+  return DEFAULT_PRODUCTION_BACKEND_URL;
 }
 
 export function setBackendUrl(url: string): void {
@@ -64,7 +62,7 @@ export function setBackendUrl(url: string): void {
 
 export function clearBackendUrl(): void {
   localStorage.removeItem(BACKEND_URL_KEY);
-  const defaultUrl = isLocalHostEnv() ? 'http://localhost:8000' : '';
+  const defaultUrl = DEFAULT_PRODUCTION_BACKEND_URL;
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('asana_backend_changed', { detail: { url: defaultUrl } }));
   }

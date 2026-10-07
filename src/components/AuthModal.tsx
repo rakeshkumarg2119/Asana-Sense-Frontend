@@ -92,21 +92,40 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
+    console.warn(
+      '%c[AsanaSense Auth]%c Server is offline or waking up from Render cold start. Auto-polling /api/health...',
+      'color: #d97706; font-weight: bold;',
+      'color: inherit;'
+    );
+
     let isSubscribed = true;
     const intervalId = setInterval(async () => {
       try {
         const isOnline = await apiHealthCheck();
         if (isOnline && isSubscribed) {
           clearInterval(intervalId);
+          console.log(
+            '%c[AsanaSense Auth]%c Server is online! Health check 200 OK. Auth form unlocked.',
+            'color: #059669; font-weight: bold;',
+            'color: inherit;'
+          );
           setIsServerOffline(false);
           setError(null);
           setAutoPollAttempts(0);
         } else if (isSubscribed) {
-          setAutoPollAttempts((prev) => prev + 1);
+          setAutoPollAttempts((prev) => {
+            const next = prev + 1;
+            console.info(`[AsanaSense Auth] Cold start waking up... (Health check #${next})`);
+            return next;
+          });
         }
       } catch {
         if (isSubscribed) {
-          setAutoPollAttempts((prev) => prev + 1);
+          setAutoPollAttempts((prev) => {
+            const next = prev + 1;
+            console.info(`[AsanaSense Auth] Cold start waking up... (Health check #${next})`);
+            return next;
+          });
         }
       }
     }, 3500);

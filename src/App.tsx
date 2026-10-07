@@ -27,7 +27,7 @@ import { WelcomeToast } from './components/WelcomeToast';
 import { Info, X, WifiOff, Server, AlertTriangle, RefreshCw, Settings as SettingsIcon, Sparkles, Mail, CheckCircle2 } from 'lucide-react';
 import type { UserProfile, YogaPose, PracticeSession } from './types';
 import { getStoredUserProfile, saveUserProfile, saveSessionRecord, fetchUserProfileFromAPI } from './utils/profileStorage';
-import { getToken, apiLogout, apiHealthCheck, getBackendUrl, apiSendSessionEmail } from './utils/apiClient';
+import { getToken, apiLogout, apiHealthCheck, getBackendUrl, setBackendUrl, checkBackendConnection, apiSendSessionEmail } from './utils/apiClient';
 import { fetchPosesFromAPI, ALL_POSES } from './data/yogaPoses';
 import { soundEngine } from './utils/audioFeedback';
 import { isMobileDevice } from './utils/deviceDetection';
@@ -62,6 +62,46 @@ export default function App() {
   const [pendingPoseAfterCheck, setPendingPoseAfterCheck] = useState<string | undefined>(undefined);
   const [autoPollAttempts, setAutoPollAttempts] = useState(0);
 
+  // Console Command Interface for Developer Settings & Cold-Start Monitoring
+  useEffect(() => {
+    const openSettings = () => {
+      setBackendSettingsOpen(true);
+      return 'Opened Asana Sense Developer Settings';
+    };
+
+    (window as any).openAsanaSettings = openSettings;
+    (window as any).openSettings = openSettings;
+    (window as any).asanaSettings = openSettings;
+    (window as any).asana = {
+      settings: openSettings,
+      openSettings: openSettings,
+      backend: (url: string) => {
+        setBackendUrl(url);
+        return `Backend URL updated to: ${url}`;
+      },
+      status: async () => {
+        const report = await checkBackendConnection();
+        console.table(report);
+        return report;
+      },
+      checkHealth: async () => {
+        const isOnline = await apiHealthCheck();
+        console.log('Health check result:', isOnline ? 'Online (200 OK)' : 'Offline / Cold Start');
+        return isOnline;
+      },
+    };
+
+    console.info(
+      '%c[AsanaSense]%c Settings are hidden in the UI. Type %casana.settings()%c or %copenAsanaSettings()%c in the console to open developer settings.',
+      'color: #059669; font-weight: bold;',
+      'color: inherit;',
+      'color: #0284c7; font-weight: bold;',
+      'color: inherit;',
+      'color: #0284c7; font-weight: bold;',
+      'color: inherit;'
+    );
+  }, []);
+
   // Background Auto-Polling when Server is Down (auto-closes modal & resumes practice upon recovery)
   useEffect(() => {
     if (!serverDownModalOpen) {
@@ -69,12 +109,23 @@ export default function App() {
       return;
     }
 
+    console.warn(
+      '%c[AsanaSense Backend]%c Server is offline or waking up from Render cold start. Auto-polling /api/health...',
+      'color: #d97706; font-weight: bold;',
+      'color: inherit;'
+    );
+
     let isSubscribed = true;
     const intervalId = setInterval(async () => {
       try {
         const isOnline = await apiHealthCheck();
         if (isOnline && isSubscribed) {
           clearInterval(intervalId);
+          console.log(
+            '%c[AsanaSense Backend]%c Server is awake and connected! Health check 200 OK. Auto-launching practice session...',
+            'color: #059669; font-weight: bold;',
+            'color: inherit;'
+          );
           setServerDownModalOpen(false);
           soundEngine.playChime(660, 0.8);
           const poseToStart = pendingPoseAfterCheck;
@@ -83,11 +134,19 @@ export default function App() {
             handleInitiateSession(poseToStart);
           }
         } else if (isSubscribed) {
-          setAutoPollAttempts((prev) => prev + 1);
+          setAutoPollAttempts((prev) => {
+            const next = prev + 1;
+            console.info(`[AsanaSense Backend] Cold start waking up... (Health check #${next})`);
+            return next;
+          });
         }
       } catch {
         if (isSubscribed) {
-          setAutoPollAttempts((prev) => prev + 1);
+          setAutoPollAttempts((prev) => {
+            const next = prev + 1;
+            console.info(`[AsanaSense Backend] Cold start waking up... (Health check #${next})`);
+            return next;
+          });
         }
       }
     }, 3500);
@@ -802,18 +861,7 @@ export default function App() {
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setServerDownModalOpen(false);
-                  setBackendSettingsOpen(true);
-                }}
-                className="w-full py-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <SettingsIcon className="w-3.5 h-3.5" />
-                <span>Configure URL</span>
-              </button>
+            <div className="pt-1">
               <button
                 type="button"
                 onClick={handleRetryBackendCheck}
@@ -821,7 +869,7 @@ export default function App() {
                 className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition cursor-pointer shadow-md shadow-emerald-900/20 disabled:opacity-60 flex items-center justify-center gap-1.5"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? 'animate-spin' : ''}`} />
-                <span>{isRetryingConnection ? 'Testing...' : 'Retry Now'}</span>
+                <span>{isRetryingConnection ? 'Checking Server...' : 'Retry Connection'}</span>
               </button>
             </div>
 

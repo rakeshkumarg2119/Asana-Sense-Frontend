@@ -149,29 +149,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Desktop In-App PWA Install Trigger */}
             <PWAInstallButton />
 
-            {/* Desktop Settings Button */}
-            <button
-              id="header-settings-btn"
-              type="button"
-              onClick={onOpenSettings}
-              title="Settings"
-              aria-label="Settings"
-              className="relative flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200/80 text-stone-700 text-[11px] font-semibold transition cursor-pointer border border-stone-200 shadow-2xs group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
-            >
-              <Settings className="w-3.5 h-3.5 text-stone-600 group-hover:rotate-45 transition duration-300" aria-hidden="true" />
-              <span className="font-medium text-stone-700">
-                Settings
-              </span>
-              <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
-                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isBackendOnline ? 'bg-emerald-400' : 'bg-amber-400'
-                }`} />
-                <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
-                  isBackendOnline ? 'bg-emerald-500' : 'bg-amber-500'
-                }`} />
-              </span>
-            </button>
-
             {userProfile ? (
               <button
                 id="user-profile-button"
@@ -323,41 +300,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </button>
                 </div>
 
-                {/* Settings Card */}
-                <div className="space-y-1.5">
-                  <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider px-2 block mb-2">
-                    Preferences
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMobileDrawerOpen(false);
-                      onOpenSettings?.();
-                    }}
-                    className="w-full p-3.5 rounded-2xl bg-stone-50 hover:bg-stone-100 border border-stone-200 text-left transition flex items-center justify-between cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-700 shadow-2xs">
-                        <Settings className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
-                          <span>Settings</span>
-                          <span className="relative flex h-2 w-2">
-                            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                              isBackendOnline ? 'bg-emerald-400' : 'bg-amber-400'
-                            }`} />
-                            <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                              isBackendOnline ? 'bg-emerald-500' : 'bg-amber-500'
-                            }`} />
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-stone-500">Configure Backend & Preferences</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-stone-400" />
-                  </button>
-                </div>
+
 
                 {/* Account / Authentication Section */}
                 <div className="space-y-2 pt-2 border-t border-stone-200">

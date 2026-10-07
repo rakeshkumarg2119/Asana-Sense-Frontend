@@ -129,7 +129,7 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
 
   const handleResetDefault = () => {
     clearBackendUrl();
-    const defaultUrl = 'http://localhost:8000';
+    const defaultUrl = 'https://asana-sense-api.onrender.com';
     setInputUrl(defaultUrl);
     handleTestConnection(defaultUrl);
   };
@@ -252,6 +252,18 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  const renderUrl = 'https://asana-sense-api.onrender.com';
+                  setInputUrl(renderUrl);
+                  handleTestConnection(renderUrl);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-mono transition cursor-pointer border border-emerald-200 flex items-center gap-1"
+              >
+                <Server className="w-3 h-3 text-emerald-600" />
+                Render Production
+              </button>
+              <button
+                type="button"
+                onClick={() => {
                   setInputUrl('http://localhost:8000');
                   handleTestConnection('http://localhost:8000');
                 }}
@@ -266,9 +278,9 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
                     setInputUrl('https://YOUR-SUBDOMAIN.ngrok-free.app');
                   }
                 }}
-                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-medium transition cursor-pointer border border-emerald-200 flex items-center gap-1"
+                className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-[11px] font-medium transition cursor-pointer border border-stone-200 flex items-center gap-1"
               >
-                <Radio className="w-3 h-3 text-emerald-600" />
+                <Radio className="w-3 h-3 text-stone-600" />
                 Ngrok Tunnel
               </button>
             </div>
