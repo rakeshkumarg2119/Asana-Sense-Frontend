@@ -78,15 +78,36 @@ export const ProgressTrendsChart: React.FC<ProgressTrendsChartProps> = ({
     activeDaysCount,
     consistencyPercentage,
     accuracyTrendDelta,
+    hasData,
   } = useMemo(() => {
     return aggregate30DayProgressTrends(sessions, userExperience);
   }, [sessions, userExperience]);
 
-  // Determine max session count for left Y-axis domain
+  // Determine max session count for left Y-axis domain (MUST be called before any early returns to respect React Rules of Hooks)
   const maxSessions = useMemo(() => {
+    if (!trendData || trendData.length === 0) return 3;
     const highest = Math.max(...trendData.map((d) => d.sessionCount), 2);
     return Math.max(highest, 3);
   }, [trendData]);
+
+  // If user has no sessions recorded, render clean motivating empty state
+  if (!hasData || sessions.length === 0) {
+    return (
+      <div className="bg-stone-50/80 rounded-2xl p-5 border border-stone-200/90 shadow-2xs text-center space-y-2.5">
+        <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 mx-auto flex items-center justify-center border border-emerald-200/60 shadow-2xs">
+          <Activity className="w-5 h-5" />
+        </div>
+        <div>
+          <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider">
+            No Practice History Yet
+          </h4>
+          <p className="text-[11px] text-stone-500 mt-1 max-w-sm mx-auto leading-relaxed">
+            Complete your first posture correction session to start tracking your joint alignment precision and practice consistency over time.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-stone-50/80 rounded-2xl p-3.5 border border-stone-200/90 shadow-2xs space-y-3">

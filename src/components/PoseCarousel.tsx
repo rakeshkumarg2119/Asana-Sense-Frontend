@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, ChevronRight, Sparkles, Activity, ShieldAlert, ArrowUpRight, Flame, Lock } from 'lucide-react';
 import { ALL_POSES } from '../data/yogaPoses';
 import { YogaPose, UserProfile } from '../types';
 import { PoseVisualArtwork } from './PoseVisualArtwork';
+import { getPersonalizedPoseList, rotatePoseList } from '../utils/poseRecommendations';
 
 interface PoseCarouselProps {
   userProfile?: UserProfile | null;
+  poseRotationOffset?: number;
   onSelectPoseForPractice: (pose: YogaPose) => void;
   onViewPoseDetails: (pose: YogaPose) => void;
   onOpenAuth?: () => void;
@@ -14,20 +16,30 @@ interface PoseCarouselProps {
 
 export const PoseCarousel: React.FC<PoseCarouselProps> = ({
   userProfile,
+  poseRotationOffset = 0,
   onSelectPoseForPractice,
   onViewPoseDetails,
   onOpenAuth,
 }) => {
+  const [sortMode, setSortMode] = useState<import('../utils/poseRecommendations').PoseSortPreference>('smart');
+
+  // Calculates personalized poses and rotates forward according to poseRotationOffset upon session exits
+  // Applies both for signed-in accounts and guest users on the normal home page
+  const personalizedPoses = useMemo(() => {
+    const list = getPersonalizedPoseList(userProfile ?? null, ALL_POSES, sortMode);
+    return rotatePoseList(list, poseRotationOffset);
+  }, [userProfile, sortMode, poseRotationOffset]);
+
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [viewMode, setViewMode] = useState<'skeleton' | 'image'>('skeleton');
-  const totalPoses = ALL_POSES.length;
+  const totalPoses = personalizedPoses.length;
 
   useEffect(() => {
     if (isPaused) return;
     const interval = setInterval(() => {
       setActiveIndex((prev) => (prev + 1) % totalPoses);
-    }, 4200);
+    }, 4500);
     return () => clearInterval(interval);
   }, [isPaused, totalPoses]);
 
@@ -49,7 +61,8 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
     }
   };
 
-  const activePose = ALL_POSES[activeIndex];
+  const currentPoseItem = personalizedPoses[activeIndex] || personalizedPoses[0];
+  const activePose = currentPoseItem.pose;
 
   return (
     <section 
@@ -66,18 +79,21 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
         <div>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold uppercase tracking-wider mb-2">
             <Sparkles className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
-            Master Pose Spectrum • Biomechanical Library
+            {userProfile ? `Curated Sequence for ${userProfile.name}` : 'Master Pose Spectrum • Biomechanical Library'}
           </div>
           <h2 className="text-2xl sm:text-3xl font-serif font-bold text-stone-900 tracking-tight">
             Curated Posture Spectrum
           </h2>
           <p className="text-stone-600 text-sm sm:text-base mt-1 max-w-2xl">
-            Explore 8 master postures engineered with biomechanical alignment markers, wrong posture impact warnings, and real-time AI accuracy tracking. <span className="text-xs text-stone-400 block sm:inline">(Use ← / → keys to navigate)</span>
+            {userProfile
+              ? 'Personalized sequence arranged for your daily practice. Progress through postures with real-time AI feedback.'
+              : 'Explore master postures engineered with biomechanical alignment markers, wrong posture impact warnings, and real-time AI accuracy tracking.'}
+            <span className="text-xs text-stone-400 block sm:inline"> (Use ← / → keys to navigate)</span>
           </p>
         </div>
 
         {/* Carousel Navigation Controls */}
-        <div className="flex items-center gap-3 self-start md:self-end">
+        <div className="flex items-center gap-2 self-start md:self-end">
           <button
             id="carousel-prev-button"
             type="button"
@@ -118,6 +134,12 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
               }`}>
                 {activePose.difficulty}
               </span>
+              {currentPoseItem.isTopPick && (
+                <span className="px-2.5 py-1 rounded-full bg-amber-400 text-stone-950 font-bold text-xs flex items-center gap-1 shadow-xs">
+                  <Sparkles className="w-3 h-3 text-stone-950 fill-stone-950" />
+                  Top Pick
+                </span>
+              )}
               {activePose.isCoreInteractive && (
                 <span className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-xs font-medium flex items-center gap-1 shadow-sm">
                   <Activity className="w-3 h-3 animate-pulse" />
@@ -192,15 +214,37 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
               className="space-y-4"
             >
               <div>
-                <p className="text-emerald-700 font-serif italic text-sm font-medium tracking-wide">
-                  {activePose.sanskritName}
-                </p>
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <p className="text-emerald-700 font-serif italic text-sm font-medium tracking-wide">
+                    {activePose.sanskritName}
+                  </p>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-bold">
+                    {currentPoseItem.recommendationTag}
+                  </span>
+                </div>
                 <h3 className="text-2xl sm:text-3xl font-bold text-stone-900">
                   {activePose.name}
                 </h3>
                 <p className="text-stone-600 text-sm mt-1 leading-relaxed">
                   {activePose.description}
                 </p>
+
+                {/* Personalized Rationale Callout when User is Signed In */}
+                {userProfile && (
+                  <div className="mt-2.5 p-3 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs space-y-1">
+                    <p className="text-emerald-950 font-medium">
+                      🎯 <strong>Why for You:</strong> {currentPoseItem.recommendationReason}
+                    </p>
+                    <p className="text-stone-600">
+                      🧘 <strong>Age Adaptation:</strong> {currentPoseItem.ageAdvice}
+                    </p>
+                    {currentPoseItem.cautionNote && (
+                      <p className="text-amber-800 font-semibold text-[11px]">
+                        ⚠️ {currentPoseItem.cautionNote}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Muscles Targeted Pills */}
@@ -280,13 +324,14 @@ export const PoseCarousel: React.FC<PoseCarouselProps> = ({
         </div>
       </div>
 
-      {/* Mini 8-Pose Thumbnail Ribbon */}
-      <div className="mt-6 grid grid-cols-4 sm:grid-cols-8 gap-2 sm:gap-3" role="tablist" aria-label="Yoga Poses Navigation">
-        {ALL_POSES.map((pose, idx) => {
+      {/* Mini 7-Pose Thumbnail Ribbon (Aligned with current sequence) */}
+      <div className="mt-6 grid grid-cols-4 sm:grid-cols-7 gap-2 sm:gap-3" role="tablist" aria-label="Yoga Poses Navigation">
+        {personalizedPoses.map((item, idx) => {
+          const pose = item.pose;
           const isCurrent = idx === activeIndex;
           return (
             <button
-              key={pose.id}
+              key={`${pose.id}-${idx}`}
               id={`thumb-pose-${pose.id}`}
               type="button"
               role="tab"

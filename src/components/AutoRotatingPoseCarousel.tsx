@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, CheckCircle2, ShieldCheck, Activity } from 'lucide-react';
+import { rotatePoseList } from '../utils/poseRecommendations';
 
 export interface AutoPoseItem {
   id: string;
@@ -181,19 +182,43 @@ export const AUTO_POSES: AutoPoseItem[] = [
   },
 ];
 
-export const AutoRotatingPoseCarousel: React.FC = () => {
+interface AutoRotatingPoseCarouselProps {
+  poseRotationOffset?: number;
+}
+
+export const AutoRotatingPoseCarousel: React.FC<AutoRotatingPoseCarouselProps> = ({
+  poseRotationOffset = 0,
+}) => {
+  // Pick a fresh random starting pose on each page refresh/reload so it never
+  // statically starts on Chair Pose, while still advancing with session exit rotation!
+  const [initialSeed] = useState(() => {
+    return Math.floor(Math.random() * AUTO_POSES.length);
+  });
+
+  const effectiveOffset = poseRotationOffset + initialSeed;
+
+  // Active rotated poses based on session exits and visit seed
+  const rotatedPoses = React.useMemo(() => {
+    return rotatePoseList(AUTO_POSES, effectiveOffset);
+  }, [effectiveOffset]);
+
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Reset current index when rotated poses sequence changes
+  useEffect(() => {
+    setCurrentIndex(0);
+  }, [effectiveOffset]);
 
   // Automatic slide rotation slowed down to 7.0 seconds per pose for comfortable observation
   useEffect(() => {
     const timer = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % AUTO_POSES.length);
+      setCurrentIndex((prev) => (prev + 1) % rotatedPoses.length);
     }, 7000);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [rotatedPoses.length]);
 
-  const activePose = AUTO_POSES[currentIndex];
+  const activePose = rotatedPoses[currentIndex] || rotatedPoses[0];
 
   return (
     <div className="relative bg-gradient-to-br from-stone-900 via-stone-950 to-emerald-950 rounded-3xl p-5 sm:p-6 text-white shadow-2xl border border-stone-800 flex flex-col justify-between overflow-hidden">
@@ -318,9 +343,9 @@ export const AutoRotatingPoseCarousel: React.FC = () => {
 
       {/* Continuous 7-Second Progress Indicator Dots */}
       <div className="flex items-center justify-center gap-2 mt-3 z-10">
-        {AUTO_POSES.map((p, idx) => (
+        {rotatedPoses.map((p, idx) => (
           <div
-            key={p.id}
+            key={`${p.id}-${idx}`}
             className={`h-1.5 rounded-full transition-all duration-700 ${
               idx === currentIndex ? 'w-10 bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'w-2.5 bg-stone-800'
             }`}

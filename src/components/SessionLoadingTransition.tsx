@@ -10,7 +10,8 @@ import {
   HeartPulse, 
   Compass, 
   Layers,
-  Cpu
+  Cpu,
+  Info
 } from 'lucide-react';
 
 interface SessionLoadingTransitionProps {
@@ -221,6 +222,16 @@ export const SessionLoadingTransition: React.FC<SessionLoadingTransitionProps> =
             );
           })}
         </div>
+
+        {/* Precautionary Health & Dietary Advisory */}
+        {mode === 'launch' && (
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-950/40 border border-amber-500/30 text-[11px] text-amber-200 text-left mt-2 shadow-xs">
+            <Info className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              <strong className="text-amber-300">Precaution:</strong> Avoid yoga poses immediately after eating. Wait 2–3 hours after full meals for safe digestion and comfort.
+            </span>
+          </div>
+        )}
 
       </div>
     </motion.div>

@@ -22,6 +22,7 @@ import { AutoRotatingPoseCarousel } from './AutoRotatingPoseCarousel';
 
 interface HeroSectionProps {
   userProfile: UserProfile | null;
+  poseRotationOffset?: number;
   isInitialSignInAnimation?: boolean;
   onStartPractice: () => void;
   onOpenAuth: (mode: 'signin' | 'signup') => void;
@@ -30,6 +31,7 @@ interface HeroSectionProps {
 
 export const HeroSection: React.FC<HeroSectionProps> = ({
   userProfile,
+  poseRotationOffset = 0,
   isInitialSignInAnimation = false,
   onStartPractice,
   onOpenAuth,
@@ -87,28 +89,15 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
             </div>
           </div>
 
-          {/* Primary CTA Buttons + Animated Pointer Guide on Sign In */}
+          {/* Primary CTA Buttons */}
           <div className="pt-2">
-            {isInitialSignInAnimation && userProfile && (
-              <motion.div
-                initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                className="mb-3 inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-amber-400 text-stone-950 font-black text-xs shadow-xl border border-amber-300 animate-bounce"
-              >
-                <Sparkles className="w-4 h-4 text-stone-950 fill-stone-950 shrink-0" />
-                <span>👇 Click Launch Posture Correction Session to start your live practice!</span>
-              </motion.div>
-            )}
-
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full">
               <button
                 id="hero-start-session-btn"
                 type="button"
                 onClick={onStartPractice}
                 aria-label="Launch Posture Correction Session"
-                className={`w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/15 cursor-pointer relative z-10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 ${
-                  isInitialSignInAnimation && userProfile ? 'ring-4 ring-amber-400 ring-offset-2 animate-pulse' : ''
-                }`}
+                className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/15 cursor-pointer relative z-10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
               >
                 <Activity className="w-4 h-4" aria-hidden="true" />
                 <span>Launch Posture Correction Session</span>
@@ -130,7 +119,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
 
         {/* Right Column: Interactive Real-Time Biomechanics HUD Graphic */}
         <div className="lg:col-span-6 relative w-full">
-          <AutoRotatingPoseCarousel />
+          <AutoRotatingPoseCarousel poseRotationOffset={poseRotationOffset} />
         </div>
       </div>
     </section>

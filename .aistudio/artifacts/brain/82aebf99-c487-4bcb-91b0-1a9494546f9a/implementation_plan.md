@@ -1,84 +1,100 @@
-# Mobile Hamburger Slide-Over Navigation Drawer Plan
+# Implementation Plan: Guest Access Guidance, Email Report Auth Trigger, Two-Step Camera Readiness, and Hold Timer Precision
 
-Implement a responsive, accessible **Mobile Hamburger Navigation Menu** that slides out smoothly from the right with backdrop blur on mobile devices ($< 768\text{px}$), consolidating all navigation links, backend/Ngrok configuration, and authentication actions while keeping desktop navigation intact.
-
----
-
-### User Review & Critical Decisions
-
-- **Confirmed Decision (Drawer Style)**: Smooth slide-over side drawer from the right with backdrop blur (`backdrop-blur-md bg-stone-950/70`).
-- **Confirmed Decision (Signed-In User Profile)**: User profile avatar button remains in the top navbar for quick access, with full profile, stats, and settings links also mirrored inside the mobile drawer.
-- **Confirmed Decision (Mobile Item Consolidation)**: The mobile drawer contains:
-  1. **Navigation Links**: Pose Spectrum, Features & Biomechanics, Zero-Storage Promise.
-  2. **System & Backend**: Python Backend / Ngrok Bridge configuration status button.
-  3. **Authentication**: Sign In and Sign Up buttons (or user profile card + quick vault link when signed in).
-  4. **PWA Install Button**: Embedded conveniently within the drawer as well.
+Enhance guest studio accessibility, streamline report email account creation, decouple camera activation from readiness, and ensure the hold timer strictly requires bodily presence and correct posture alignment.
 
 ---
 
-### 1. Overview & Visual Design
+## User Review Required
 
-- **Mobile Top Bar**:
-  - Left: AsanaSense Logo (`size="sm"` or `"md"`).
-  - Right: Quick user profile avatar (if logged in) + Hamburger Menu Toggle button (`Menu` / `X` with active animation and $\ge 44\text{px}$ touch target).
-- **Slide-Over Drawer (`motion.div` from right: `x: '100%'` $\to$ `x: 0`)**:
-  - **Header**: AsanaSense mini brand emblem + Close button (`X`).
-  - **Navigation Section**:
-    - 🌸 *Pose Spectrum* (scrolls to `#pose-carousel-showcase` and closes drawer).
-    - 🧬 *Features & Biomechanics* (scrolls to `#features-section` and closes drawer).
-    - 🛡️ *Zero-Storage Promise* (scrolls to `#privacy-assurance-promise-banner` and closes drawer).
-  - **Backend / Ngrok Bridge Card**: Shows live connection pill (Ngrok / Backend status indicator) and opens settings modal.
-  - **Auth & Account Footer**:
-    - If logged out: Prominent *Sign In* and *Sign Up* buttons.
-    - If logged in: User avatar card with display name, email, and *View Sanctuary Vault & Profile* button.
+> [!IMPORTANT]
+> **Guest Locked Pose Experience**: When a guest initiates a session with a locked pose from the Curated Posture Spectrum, they will enter the studio smoothly. The studio stage will display a polite advisory explaining that the pose is reserved for registered accounts, prompting them with a small message and left arrow (`←`) to select one of the 3 free poses from the shelf or sign in to unlock all 7 postures.
+> **Two-Step Camera & Ready Controls**: "Turn On Camera" will be an independent action that activates video streaming without starting timers. "I'm Ready" will be a separate secondary action that begins active posture monitoring.
+> **Strict Hold Timer**: The pose hold timer will pause and refuse to increment unless the AI vision model confirms that a human is detected in frame (`pose_detected: true`) and the recognized posture matches the selected asana (`isPoseMatch: true`).
 
 ---
 
-### 2. Accessibility & Interaction Details
+## Proposed Changes
 
-- Keyboard Escape key closes the drawer immediately.
-- Traps focus while open, preventing scroll bleed on `document.body` (`overflow: hidden`).
-- Click on backdrop overlay dismisses the drawer smoothly.
-- All links and buttons meet WCAG AA touch target requirements ($\ge 44\text{px}$).
-
----
-
-### 3. Proposed Component Changes
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                          Navbar.tsx                         │
-│                                                             │
-│  [Logo]                       [Avatar (if auth)] [☰ Hamburger]│
-│                                                             │
-│   (When clicked on mobile:)                                 │
-│   ┌───────────────────────────────────────────────────────┐ │
-│   │ Backdrop (stone-950/75 blur)                          │ │
-│   │                     ┌───────────────────────────────┐ │ │
-│   │                     │ Mobile Drawer (Slide from R)  │ │ │
-│   │                     │ • Brand Header & [X] Close    │ │ │
-│   │                     │ • Navigation Links            │ │ │
-│   │                     │   - Pose Spectrum             │ │ │
-│   │                     │   - Features & Biomechanics   │ │ │
-│   │                     │   - Zero-Storage Promise      │ │ │
-│   │                     │ • Backend / Ngrok Button      │ │ │
-│   │                     │ • PWA Install Action          │ │ │
-│   │                     │ • Auth (Sign In / Sign Up /   │ │ │
-│   │                     │   Profile Management)         │ │ │
-│   │                     └───────────────────────────────┘ │ │
-│   └───────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
-
-#### Files to Update:
-1. **`src/components/Navbar.tsx`**:
-   - Add mobile drawer state (`mobileMenuOpen`), hamburger toggle button (`md:hidden`), and full `AnimatePresence` slide-over drawer implementation.
-   - Hide individual desktop nav links, desktop Ngrok badge, and desktop Auth button cluster on small screens (`hidden md:flex`).
+### 1. Curated Posture Spectrum & Guest Session Initiation
+#### Files: `src/App.tsx`, `src/components/PoseCarousel.tsx`
+- In `App.tsx` (`handleInitiateSession`): Allow guests to enter the live session with any selected pose instead of abruptly blocking them at the homepage.
+- Pass the selected pose ID into `LivePostureSession` as the initial pose.
+- Ensure guests who click "Practice with AI Vision Feedback" transition into the live studio experience seamlessly.
 
 ---
 
-### 4. Verification & Testing
+### 2. Live Studio Guest Guidance for Locked Poses
+#### Files: `src/components/LivePostureSession.tsx`, `src/components/ViewportHUD.tsx`
+- Detect when a practitioner is in Guest Mode (`!userProfile`) and has selected a locked pose (`!['dog', 'warrior', 'tree'].includes(currentPose.id)`).
+- On the live studio stage greeting card and Viewport HUD:
+  - Display a polite guidance box:
+    > *"You are currently practicing in Guest Mode. [Pose Name] is reserved for registered practitioners. Feel free to explore our 3 free poses (Downward Dog, Warrior II, Tree Pose), or create a free account to unlock the entire sequence."*
+  - Add small text with a left arrow indicator (`← Select free poses in shelf or Sign Up`) pointing to the shelf drawer and authentication options.
+  - Disable the "I'm Ready" monitoring trigger on locked poses for guests with a clean "Unlock Pose via Free Sign Up" action button.
 
-- Run `lint_applet` and `compile_applet`.
-- Test drawer open/close animation, Escape key, overlay click, and navigation scroll links.
-- Test both signed-out and signed-in mobile layouts.
+---
+
+### 3. Immediate Auth Modal on Session Report "Email Report" Click
+#### File: `src/components/SessionReportModal.tsx`
+- In `handleSendBackendEmail`: When a guest practitioner (no `userProfile?.email`) clicks **"Email Report"**, immediately invoke `onOpenAuth?.()` to open the Sign In / Sign Up modal card overlay.
+- Keep the session report state intact in the background so once signed in or signed up, the user can immediately dispatch their certified report to their newly created account email.
+
+---
+
+### 4. Decouple "Turn On Camera" and "I'm Ready" Controls
+#### Files: `src/components/LivePostureSession.tsx`, `src/components/ViewportHUD.tsx`
+- Separate the current combined action into two distinct sequential buttons across both the center Viewport HUD card and the bottom Action Bar:
+  1. **Button 1: "Turn On Camera"** (`startCamera`): Initializes webcam stream, calibrates lighting, and confirms video feed without starting any posture timer or hold streak.
+  2. **Button 2: "I'm Ready"** (`handleConfirmReadyAndStart`): Only enabled when camera is live. Begins pose hold tracking and AI skeletal monitoring.
+- Clearly update button copy, icons (`Camera` vs `Play`), and status labels to avoid any ambiguity.
+
+---
+
+### 5. Precision Hold Timer Logic
+#### File: `src/components/LivePostureSession.tsx`
+- Audit and harden the hold timer `setInterval` logic (lines 775–865):
+  - Previously, when `modelPoseResult` was `null` (such as before websocket frames returned or when nobody was standing in front of the camera), the timer would fall through and increment every second automatically.
+  - Refactor condition:
+    ```ts
+    const currentResult = modelPoseResultRef.current;
+    // Strict Guard: Must have an active detection result with a human body present
+    if (!currentResult || !currentResult.pose_detected) {
+      return; // Do NOT increment hold timer
+    }
+    // Strict Guard: Must match the currently selected pose
+    if (currentResult.pose_mismatch || !isPoseMatch(currentResult.pose_name, pose.id)) {
+      return; // Do NOT increment hold timer
+    }
+    // Strict Guard: Must not have critical red misalignment
+    if (hasRedJoint) {
+      handleStreakBreak(currentHold);
+      return;
+    }
+    // Only increment when body is present, pose matches, and form is aligned
+    ```
+- This guarantees the hold timer will never run endlessly while the user is absent, stepping into frame, or performing an incorrect pose.
+
+---
+
+## Verification Plan
+
+### Automated Verification
+- Run `compile_applet` to verify clean TypeScript compilation with zero type errors.
+- Run `lint_applet` to ensure codebase passes strict lint checks (`tsc --noEmit`).
+
+### Functional Verification
+1. **Curated Posture Spectrum Guest Practice**:
+   - As a guest, select Chair Pose (locked pose) in the Curated Posture Spectrum and click "Practice with AI Vision Feedback".
+   - Verify it launches into Live Posture Session without blocking.
+   - Verify the studio stage displays the polite guest locked pose advisory with the left arrow guidance pointing to free poses or sign-up.
+2. **Email Report Modal**:
+   - Complete a session or trigger a report as a guest. Click "Email Report" in the footer.
+   - Verify the Sign In / Sign Up modal card opens immediately.
+3. **Two-Step Camera & Ready Controls**:
+   - In Live Session, verify "Turn On Camera" and "I'm Ready" are separate buttons.
+   - Click "Turn On Camera". Verify camera starts, but the hold timer stays at 0s and does not count down or tick.
+   - Click "I'm Ready". Verify posture monitoring activates.
+4. **Hold Timer Presence**:
+   - Turn on camera and click "I'm Ready" while stepping away from camera frame.
+   - Verify the hold timer does NOT tick up and stays at 0s.
+   - Step into frame and perform the matching pose: verify the hold timer increments smoothly.

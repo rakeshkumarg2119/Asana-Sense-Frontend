@@ -70,9 +70,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   // Sync sessions and name on modal open or user prop changes
   useEffect(() => {
     if (isOpen) {
-      // 1. Instantly display whatever is in storage
+      // 1. Instantly display whatever is in storage for this specific user
       try {
-        const rawSessions = getStoredSessions() || [];
+        const rawSessions = getStoredSessions(user?.email) || [];
         const seen = new Set<string>();
         const unique = rawSessions.filter((s) => {
           const id = s.id || (s as any)._id || (s as any).start_time?.toString() || (s as any).startTime?.toString();
@@ -88,7 +88,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       }
 
       // 2. Fetch live session history from MongoDB backend
-      fetchSessionsFromAPI().then((liveSessions) => {
+      fetchSessionsFromAPI(user?.email).then((liveSessions) => {
         if (Array.isArray(liveSessions) && liveSessions.length > 0) {
           const seen = new Set<string>();
           const unique = liveSessions.filter((s) => {
@@ -110,7 +110,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       setIsEditingName(false);
       setShowDeleteAccountModal(false);
     }
-  }, [isOpen, user?.name]);
+  }, [isOpen, user?.name, user?.email]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -156,7 +156,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
   // Handle Delete Single Session
   const handleDeleteSession = (sessId: string) => {
-    const updated = deleteStoredSession(sessId);
+    const updated = deleteStoredSession(sessId, user?.email);
     setPastSessions(updated);
     setDeletingSessionId(null);
 
@@ -371,6 +371,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <span className="text-lg font-bold text-teal-700">{avgScore > 0 ? `${avgScore}%` : '0%'}</span>
             </div>
           </div>
+
 
           {/* 30-DAY PROGRESS TRENDS CHART (RECHARTS DUAL-AXIS COMBO) */}
           <ProgressTrendsChart 

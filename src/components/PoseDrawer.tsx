@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'motion/react';
 import {
   Sliders,
@@ -8,11 +8,20 @@ import {
   ThumbsDown,
   CheckCircle2,
   AlertTriangle,
-  Play
+  Play,
+  Sparkles,
+  Award,
+  ShieldAlert,
+  Compass,
+  HeartHandshake,
+  Lock
 } from 'lucide-react';
+import type { YogaPose, SessionPoseRecord, UserProfile } from '../types';
 import { ALL_POSES } from '../data/yogaPoses';
-import type { YogaPose, SessionPoseRecord } from '../types';
 import { PoseVisualArtwork } from './PoseVisualArtwork';
+import { getPersonalizedPoseList, getGuestDrawerPoses, rotatePoseList } from '../utils/poseRecommendations';
+
+export const GUEST_ALLOWED_POSE_IDS = ['dog', 'warrior', 'tree'];
 
 export interface PoseDrawerProps {
   isDrawerOpen: boolean;
@@ -26,12 +35,15 @@ export interface PoseDrawerProps {
   poseRecords: Record<string, SessionPoseRecord>;
   isPoseActive: boolean;
   poseGridScrollRef: React.RefObject<HTMLDivElement | null>;
+  userProfile?: UserProfile | null;
+  poseRotationOffset?: number;
   onCloseDrawer: () => void;
   onSetDrawerShelfMode: (mode: 'grid' | 'card') => void;
   onSetActiveCardTab: (tab: 'all' | 'pros' | 'cons') => void;
   onSetReferenceDisplayMode: (mode: 'photo' | 'artwork') => void;
   onSelectPose: (index: number) => void;
   onConfirmReadyAndStart: () => void;
+  onOpenAuth?: () => void;
 }
 
 export const PoseDrawer: React.FC<PoseDrawerProps> = ({
@@ -46,13 +58,34 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
   poseRecords,
   isPoseActive,
   poseGridScrollRef,
+  userProfile,
+  poseRotationOffset = 0,
   onCloseDrawer,
   onSetDrawerShelfMode,
   onSetActiveCardTab,
   onSetReferenceDisplayMode,
   onSelectPose,
   onConfirmReadyAndStart,
+  onOpenAuth,
 }) => {
+  const isGuest = !userProfile;
+
+  // Drawer Poses Arrangement:
+  // For Guest Mode: 3 unlocked poses ('dog', 'warrior', 'tree') placed FIRST, followed by locked poses!
+  // Both Guest & Signed-in modes rotate forward according to poseRotationOffset upon session exits.
+  const displayPoses = useMemo(() => {
+    if (isGuest) {
+      return getGuestDrawerPoses(ALL_POSES, GUEST_ALLOWED_POSE_IDS, poseRotationOffset);
+    }
+    // Signed-in user: map all poses with originalIndex and rotate forward
+    const indexed = ALL_POSES.map((pose, originalIndex) => ({
+      pose,
+      isLocked: false,
+      originalIndex,
+    }));
+    return rotatePoseList(indexed, poseRotationOffset);
+  }, [isGuest, poseRotationOffset]);
+
   return (
     <motion.div
       key="yoga-pose-drawer"
@@ -64,7 +97,7 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
       className="flex flex-col space-y-2.5 min-w-0 transition-[width] duration-75 lg:pl-2.5 h-full min-h-0 relative z-30 pointer-events-auto"
     >
       {/* Drawer Main Container */}
-      <div className="bg-stone-900/95 rounded-3xl p-3.5 sm:p-4 border border-stone-800 shadow-2xl flex flex-col h-full min-h-0 overflow-hidden">
+      <div className="bg-stone-900/95 rounded-3xl p-3 sm:p-4 border border-stone-800 shadow-2xl flex flex-col h-full min-h-0 overflow-hidden">
         
         {/* Drawer Header */}
         <div className="flex items-center justify-between pb-3 border-b border-stone-800 shrink-0 gap-2">
@@ -73,11 +106,22 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
               <Sliders className="w-3.5 h-3.5" />
             </div>
             <div className="truncate">
-              <h2 className="text-xs font-bold text-white uppercase tracking-wider truncate">
-                Yoga Pose (8 Poses)
-              </h2>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h2 className="text-xs font-bold text-white uppercase tracking-wider truncate">
+                  Yoga Posture Spectrum
+                </h2>
+                {isGuest && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold">
+                    Guest Mode • 3 Poses Unlocked
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-stone-400 truncate">
-                {drawerShelfMode === 'grid' ? '8 Asanas Shelves (2×4 Table Grid)' : `${currentPose?.name || 'Select Asana'} • Pros & Cons`}
+                {drawerShelfMode === 'grid' 
+                  ? isGuest
+                    ? 'Downward Dog, Warrior III & Tree Pose available'
+                    : 'Select any posture to begin biomechanical tracking'
+                  : `${currentPose?.name || 'Select Asana'} • Form & Corrections`}
               </p>
             </div>
           </div>
@@ -94,7 +138,7 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
               title={drawerShelfMode === 'grid' ? 'Collapse table into Focused Pose Details' : 'Expand back to 2×4 Grid'}
             >
               <Grid className="w-3 h-3" />
-              <span>{drawerShelfMode === 'grid' ? 'Focus Pose Details' : '2×4 Grid'}</span>
+              <span>{drawerShelfMode === 'grid' ? 'Details' : 'Grid'}</span>
             </button>
 
             <button
@@ -113,43 +157,83 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
           {/* CASE 1: FULL 2×4 GRID TABLE VIEW */}
           {drawerShelfMode === 'grid' ? (
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-                  Select Asana From 2×4 Shelves (Click to Select):
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2.5">
-                {ALL_POSES.map((pose, idx) => {
-                  const isSelected = idx === selectedPoseIndex;
-                  const isDone = (poseRecords[pose.id]?.durationSeconds || 0) > 0;
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {displayPoses.map(({ pose, isLocked, originalIndex }, sortedIdx) => {
+                  const isSelected = originalIndex === selectedPoseIndex;
+                  const isDone = (poseRecords[pose.id]?.durationSeconds || 0) >= 5;
+                  const isLockedForGuest = isGuest && isLocked;
 
                   return (
                     <motion.button
-                      key={pose.id}
-                      onClick={() => onSelectPose(idx)}
-                      whileHover={{ scale: 1.02 }}
+                      key={`${pose.id}-${sortedIdx}`}
+                      onClick={() => {
+                        if (isLockedForGuest) {
+                          if (onOpenAuth) onOpenAuth();
+                        } else {
+                          onSelectPose(originalIndex);
+                        }
+                      }}
+                      whileHover={{ scale: isLockedForGuest ? 1.01 : 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       className={`p-2.5 rounded-2xl border text-left transition cursor-pointer flex flex-col justify-between relative group ${
                         isSelected
                           ? `bg-stone-800/90 border-emerald-500 ring-2 ring-emerald-400 shadow-md`
+                          : isLockedForGuest
+                          ? 'bg-stone-950/60 border-stone-800/60 opacity-80 hover:opacity-100 hover:border-amber-500/50'
                           : 'bg-stone-950/80 border-stone-800 hover:border-stone-700'
                       }`}
                     >
+                      {/* Top Badges */}
+                      <div className="flex items-center justify-between gap-1 mb-1.5 w-full">
+                        <div className="flex items-center gap-1">
+                          <span className="px-1.5 py-0.2 rounded-md bg-stone-900 border border-stone-800 text-[8px] font-mono text-stone-300 font-bold">
+                            #{sortedIdx + 1}
+                          </span>
+                          <span className="px-1.5 py-0.2 rounded-md bg-stone-900/80 text-[8px] font-medium text-emerald-400/90 border border-emerald-900/30">
+                            {pose.difficulty}
+                          </span>
+                        </div>
+                        {isLockedForGuest ? (
+                          <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[8px] font-bold flex items-center gap-0.5">
+                            <Lock className="w-2.5 h-2.5" /> Unlock
+                          </span>
+                        ) : isGuest ? (
+                          <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[8px] font-bold flex items-center gap-0.5">
+                            <CheckCircle2 className="w-2.5 h-2.5" /> Basic
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {/* Image Thumbnail */}
                       <div className="aspect-[4/3] w-full rounded-xl overflow-hidden bg-stone-950 mb-2 relative">
                         <img
                           src={pose.imageUrl}
                           alt={pose.name}
-                          className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                          className={`w-full h-full object-cover group-hover:scale-105 transition duration-300 ${
+                            isLockedForGuest ? 'filter grayscale-[30%] brightness-75' : ''
+                          }`}
                           referrerPolicy="no-referrer"
                         />
-                        {isDone && (
+                        {isLockedForGuest && (
+                          <div className="absolute inset-0 bg-stone-950/50 backdrop-blur-[1px] flex flex-col items-center justify-center gap-1 text-center p-2">
+                            <div className="w-6 h-6 rounded-full bg-amber-500/20 border border-amber-500/50 flex items-center justify-center text-amber-300 shadow-lg">
+                              <Lock className="w-3 h-3" />
+                            </div>
+                            <span className="text-[9px] font-bold text-amber-200">Sign in to unlock</span>
+                          </div>
+                        )}
+                        {isDone && !isLockedForGuest && (
                           <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-bold shadow-xs">
                             ✓
                           </span>
                         )}
+                        <span className="absolute bottom-1 left-1 px-1.5 py-0.2 rounded bg-stone-950/80 backdrop-blur-xs text-[8px] text-stone-300 font-mono">
+                          {pose.idealHoldDurationSeconds}s hold
+                        </span>
                       </div>
 
-                      <div>
+                      {/* Pose Name & Sanskrit */}
+                      <div className="space-y-0.5">
                         <span className={`text-[11px] font-bold block truncate leading-tight ${isSelected ? 'text-emerald-300' : 'text-stone-200'}`}>
                           {pose.name}
                         </span>
@@ -163,9 +247,9 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
               </div>
             </div>
           ) : (
-            /* CASE 2: CLEAN DETAIL-ONLY VIEW (POSE IMAGE + PROS & CONS) */
+            /* CASE 2: CLEAN DETAIL-ONLY VIEW (POSE IMAGE + PERSONALIZED REASON + PROS & CONS) */
             currentPose ? (
-              <div className="space-y-4">
+              <div className="space-y-3.5">
                 <div className="bg-stone-950/90 rounded-2xl p-4 border border-stone-800 space-y-3.5">
                   {/* Header & Tabs */}
                   <div className="flex items-center justify-between gap-1 flex-wrap">
@@ -223,7 +307,7 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
                     )}
 
                     <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-lg bg-stone-950/80 text-[9px] text-stone-200 font-semibold backdrop-blur-xs">
-                      Hold: {currentPose.idealHoldDurationSeconds}s
+                      Target Hold: {currentPose.idealHoldDurationSeconds}s
                     </div>
 
                     <button
@@ -234,15 +318,27 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
                     </button>
                   </div>
 
-                  {/* Start Pose Button Inside Drawer for quick activation */}
+                  {/* Start / Unlock Pose Button */}
                   {!isPoseActive && (
-                    <button
-                      onClick={onConfirmReadyAndStart}
-                      className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-white" />
-                      <span>I'm Ready • Start {currentPose.name}</span>
-                    </button>
+                    isGuest && !GUEST_ALLOWED_POSE_IDS.includes(currentPose.id) ? (
+                      <button
+                        type="button"
+                        onClick={onOpenAuth}
+                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-stone-950 font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-md cursor-pointer"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Sign In to Unlock {currentPose.name}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={onConfirmReadyAndStart}
+                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-white" />
+                        <span>I'm Ready • Start {currentPose.name}</span>
+                      </button>
+                    )
                   )}
 
                   {/* PROS (Benefits & Target Muscles) */}
@@ -250,7 +346,7 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
                     <div className="bg-emerald-950/50 border border-emerald-600/40 rounded-xl p-3 space-y-2 text-xs">
                       <div className="flex items-center justify-between text-emerald-400 font-bold text-[11px]">
                         <span className="flex items-center gap-1.5">
-                          <ThumbsUp className="w-3.5 h-3.5 text-emerald-400" /> PROS: Benefits & Muscles
+                          <ThumbsUp className="w-3.5 h-3.5 text-emerald-400" /> PROS: Benefits &amp; Muscles
                         </span>
                         <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300">
                           Positive
@@ -265,7 +361,7 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
                         ))}
                       </ul>
                       <div className="pt-1.5 border-t border-emerald-800/40 flex flex-wrap gap-1">
-                        {currentPose.targetMuscles.map((m) => (
+                        {currentPose.targetMuscles?.map((m) => (
                           <span key={m} className="px-2 py-0.5 rounded bg-stone-900 text-stone-300 text-[9px]">
                             {m}
                           </span>
@@ -279,14 +375,14 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
                     <div className="bg-rose-950/50 border border-rose-600/40 rounded-xl p-3 space-y-2 text-xs">
                       <div className="flex items-center justify-between text-rose-400 font-bold text-[11px]">
                         <span className="flex items-center gap-1.5">
-                          <ThumbsDown className="w-3.5 h-3.5 text-rose-400" /> CONS: Mistakes & Risks
+                          <ThumbsDown className="w-3.5 h-3.5 text-rose-400" /> CONS: Mistakes &amp; Risks
                         </span>
                         <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300">
                           Harmful Errors
                         </span>
                       </div>
                       <div className="space-y-2">
-                        {currentPose.wrongPostureImpacts.map((w, i) => (
+                        {currentPose.wrongPostureImpacts?.map((w, i) => (
                           <div key={i} className="bg-stone-950/80 p-2.5 rounded-lg border border-rose-900/40 text-[10px] space-y-1">
                             <p className="text-rose-200 font-bold flex items-center gap-1">
                               <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
@@ -303,7 +399,7 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
               </div>
             ) : (
               <div className="p-6 text-center text-stone-400 text-xs">
-                Click on any pose from the 2×4 grid to view details.
+                Click on any pose from the shelves above to view details.
               </div>
             )
           )}

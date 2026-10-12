@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Camera, 
@@ -62,11 +62,13 @@ import { usePoseLandmarker } from '../hooks/usePoseLandmarker';
 import { soundEngine } from '../utils/audioFeedback';
 import { AsanaSenseLogo } from './AsanaSenseLogo';
 import { AmbientAudioPlayer } from './AmbientAudioPlayer';
-import { PoseDrawer } from './PoseDrawer';
+import { PoseDrawer, GUEST_ALLOWED_POSE_IDS } from './PoseDrawer';
 import { ViewportHUD } from './ViewportHUD';
+import { getPersonalizedPoseList } from '../utils/poseRecommendations';
 
 interface LivePostureSessionProps {
   userProfile: UserProfile | null;
+  poseRotationOffset?: number;
   onFinishSession: (session: PracticeSession) => void;
   onClose: () => void;
   onOpenAuth: () => void;
@@ -172,6 +174,7 @@ function isPoseMatch(predicted?: string | null, target?: string | null): boolean
 
 export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   userProfile,
+  poseRotationOffset = 0,
   onFinishSession,
   onClose,
   onOpenAuth,
@@ -201,11 +204,20 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     return null;
   });
 
+  // Personalized pose sequence computed for practitioner's experience level & age
+  const personalizedPoses = useMemo(() => {
+    return getPersonalizedPoseList(userProfile);
+  }, [userProfile]);
+
   // Active posture monitoring state: only starts when user is explicitly ready!
   const [isPoseActive, setIsPoseActive] = useState<boolean>(false);
 
   const currentPose = selectedPoseIndex !== null ? ALL_POSES[selectedPoseIndex] : null;
   const poseTheme = currentPose ? (POSE_COLOR_PALETTES[currentPose.id] || POSE_COLOR_PALETTES['tree-pose']) : POSE_COLOR_PALETTES['tree-pose'];
+
+  // Guest Mode lock detection: Guest is allowed 'dog', 'warrior', 'tree'
+  const isGuest = !userProfile;
+  const isCurrentPoseLocked = Boolean(currentPose && isGuest && !GUEST_ALLOWED_POSE_IDS.includes(currentPose.id));
 
   // Yoga Pose Drawer state (Right Side, equally spaced with Camera on Left, adjustable size)
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
@@ -240,6 +252,9 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   // Audio / Speech Coaching & Mute State
   const [voiceSpeechEnabled, setVoiceSpeechEnabled] = useState(true);
 
+  // Precautionary Health & Dietary Advisory state (shown upon entering session for both Guest and Authorized Yogi)
+  const [showFoodAdvisory, setShowFoodAdvisory] = useState<boolean>(true);
+
   useEffect(() => {
     soundEngine.setMuted(!voiceSpeechEnabled);
   }, [voiceSpeechEnabled]);
@@ -260,6 +275,9 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
   // Camera & Stream state
   const [cameraActive, setCameraActive] = useState(false);
+  const [isStartingCamera, setIsStartingCamera] = useState(false);
+  const cameraActiveRef = useRef(cameraActive);
+  cameraActiveRef.current = cameraActive;
   const [cameraPermissionError, setCameraPermissionError] = useState<string | null>(null);
   const [videoFitMode, setVideoFitMode] = useState<'contain' | 'cover'>('contain');
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -550,6 +568,12 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       }
     },
     onResume: () => {
+      if (!cameraActive) {
+        if (voiceSpeechEnabled) {
+          soundEngine.speak('Please turn on camera first.');
+        }
+        return;
+      }
       setIsPoseActive(true);
       soundEngine.playChime(528, 0.5);
       if (voiceSpeechEnabled) {
@@ -560,8 +584,9 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   });
 
   // Robust Camera initialization with multi-tier fallback
-  const startCamera = async () => {
+  const startCamera = async (): Promise<boolean> => {
     try {
+      setIsStartingCamera(true);
       setCameraPermissionError(null);
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Web camera API is not supported in this browser environment.');
@@ -584,6 +609,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       if (stream) {
         streamRef.current = stream;
         setCameraActive(true);
+        cameraActiveRef.current = true;
         setCameraPermissionError(null);
         if (voiceSpeechEnabled) {
           soundEngine.speak('Camera active. Ready for vision monitoring.');
@@ -593,7 +619,11 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
         setTimeout(() => {
           voiceController.startListening();
         }, 300);
+        setIsStartingCamera(false);
+        return true;
       }
+      setIsStartingCamera(false);
+      return false;
     } catch (err: any) {
       console.warn('Camera access fallback notice:', err);
       const isDenied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
@@ -605,6 +635,9 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
         : 'Camera could not be started: ' + (err?.message || 'Access restricted.');
       setCameraPermissionError(msg);
       setCameraActive(false);
+      cameraActiveRef.current = false;
+      setIsStartingCamera(false);
+      return false;
     }
   };
 
@@ -639,6 +672,21 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       }
     }
     setCameraActive(false);
+    cameraActiveRef.current = false;
+    setIsPoseActive(false);
+    if (poseHoldSeconds > 0 && selectedPoseIndex !== null) {
+      const pose = ALL_POSES[selectedPoseIndex];
+      if (pose) {
+        setBestHoldPerPose((prev) => {
+          const prevBest = prev[pose.id] || 0;
+          if (poseHoldSeconds > prevBest) {
+            return { ...prev, [pose.id]: poseHoldSeconds };
+          }
+          return prev;
+        });
+      }
+      setPoseHoldSeconds(0);
+    }
   };
 
   useEffect(() => {
@@ -656,6 +704,12 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
       if (e.key === ' ' || e.code === 'Space') {
         e.preventDefault();
+        if (!cameraActive) {
+          if (voiceSpeechEnabled) {
+            soundEngine.speak('Please turn on camera first.');
+          }
+          return;
+        }
         setIsPoseActive((prev) => {
           const next = !prev;
           soundEngine.playChime(next ? 528 : 400, 0.4);
@@ -722,16 +776,32 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   voiceSpeechEnabledRef.current = voiceSpeechEnabled;
 
   // Model-driven Pose Hold Timer:
-  // Decoupled 1-second interval ticks smoothly while ready and holding pose
+  // Decoupled 1-second interval ticks smoothly while ready and holding pose with camera active
   useEffect(() => {
-    if (!isPoseActive || selectedPoseIndex === null) return;
+    // Hold streak timer MUST NOT run if pose is not active, camera is not active, or no pose selected
+    if (!isPoseActive || !cameraActive || selectedPoseIndex === null) return;
 
     const pose = ALL_POSES[selectedPoseIndex];
     if (!pose) return;
 
     const interval = setInterval(() => {
+      // Safety check: if camera turned off or stream stopped, do not tick
+      if (!cameraActiveRef.current || !streamRef.current) {
+        return;
+      }
+
       const currentResult = modelPoseResultRef.current;
       const currentHold = poseHoldSecondsRef.current;
+
+      // Strict Guard 1: User MUST be detected in camera frame by AI Vision model
+      if (!currentResult || !currentResult.pose_detected) {
+        return; // Do NOT increment hold timer when user is not present
+      }
+
+      // Strict Guard 2: Predicted posture from AI/websocket MUST match the target pose
+      if (currentResult.pose_mismatch || !isPoseMatch(currentResult.predicted_pose, pose.id)) {
+        return; // Do NOT increment hold timer when performing a different pose or aligning
+      }
 
       const hasRedJoint = Boolean(
         currentResult?.has_red ||
@@ -794,7 +864,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isPoseActive, selectedPoseIndex]);
+  }, [isPoseActive, cameraActive, selectedPoseIndex]);
 
   // Handle Pose Selection (manual click or voice selection) - sets pose but waits for user to be ready!
   const handleSelectPose = (idx: number, isNextPose = false) => {
@@ -803,11 +873,11 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
     const isSamePose = selectedPoseIndex === idx;
 
-    // Record previous pose metrics if active or practiced
+    // Record previous pose metrics only if actively held for at least 5 seconds
     if (currentPose && !isSamePose) {
       const priorHold = Math.max(poseHoldSeconds, bestHoldPerPose[currentPose.id] || 0);
-      const priorAttempts = attemptsPerPose[currentPose.id] || (priorHold > 0 ? 1 : 0);
-      if (priorHold > 0 || priorAttempts > 0) {
+      const priorAttempts = attemptsPerPose[currentPose.id] || 0;
+      if (priorHold >= 5) {
         setPoseRecords((prev) => ({
           ...prev,
           [currentPose.id]: {
@@ -819,10 +889,10 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
             sanskrit_name: currentPose.sanskritName || '',
             durationSeconds: (prev[currentPose.id]?.durationSeconds || 0) + (poseHoldSeconds || priorHold),
             duration_seconds: (prev[currentPose.id]?.durationSeconds || 0) + (poseHoldSeconds || priorHold),
-            bestHoldSeconds: Math.max(prev[currentPose.id]?.bestHoldSeconds || 0, bestHoldPerPose[currentPose.id] || poseHoldSeconds || 1),
-            best_hold_seconds: Math.max(prev[currentPose.id]?.bestHoldSeconds || 0, bestHoldPerPose[currentPose.id] || poseHoldSeconds || 1),
-            attemptsCount: Math.max(prev[currentPose.id]?.attemptsCount || 0, priorAttempts),
-            attempts_count: Math.max(prev[currentPose.id]?.attemptsCount || 0, priorAttempts),
+            bestHoldSeconds: Math.max(prev[currentPose.id]?.bestHoldSeconds || 0, bestHoldPerPose[currentPose.id] || poseHoldSeconds || 5),
+            best_hold_seconds: Math.max(prev[currentPose.id]?.bestHoldSeconds || 0, bestHoldPerPose[currentPose.id] || poseHoldSeconds || 5),
+            attemptsCount: Math.max(prev[currentPose.id]?.attemptsCount || 0, priorAttempts, 1),
+            attempts_count: Math.max(prev[currentPose.id]?.attemptsCount || 0, priorAttempts, 1),
             accuracyScore: postureAnalysis.score || 92,
             accuracy_score: postureAnalysis.score || 92,
             cuesReceived: postureAnalysis.keyCues || [],
@@ -838,12 +908,6 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     setPoseHoldSeconds(0);
     setDrawerShelfMode('card');
     soundEngine.playChime(528, 1);
-
-    // Track attempt count
-    setAttemptsPerPose((prev) => ({
-      ...prev,
-      [newPose.id]: (prev[newPose.id] || 0) + 1,
-    }));
 
     setPostureAnalysis({
       score: 93,
@@ -862,8 +926,8 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     }
   };
 
-  // User confirms ready: start camera if needed, start timer, start AI monitoring
-  const handleConfirmReadyAndStart = () => {
+  // User confirms ready: starts AI posture monitoring
+  const handleConfirmReadyAndStart = async () => {
     if (selectedPoseIndex === null) {
       handleSelectPose(0);
       return;
@@ -872,15 +936,38 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     const pose = ALL_POSES[selectedPoseIndex];
     if (!pose) return;
 
+    if (isCurrentPoseLocked) {
+      if (voiceSpeechEnabled) {
+        soundEngine.speak(`${pose.name} is locked in guest mode. Please choose Downward Dog, Warrior Two, or Tree Pose, or sign up to unlock.`);
+      }
+      onOpenAuth();
+      return;
+    }
+
+    // Camera MUST be active before starting pose timer and streak!
     if (!cameraActive) {
-      startCamera();
+      if (voiceSpeechEnabled) {
+        soundEngine.speak('Please turn on your camera first, then click I am ready.');
+      }
+      const success = await startCamera();
+      if (!success) {
+        if (voiceSpeechEnabled) {
+          soundEngine.speak('Please enable camera access to start posture monitoring.');
+        }
+      }
+      // Camera started; return so user can see preview and explicitly click "I'm Ready"
+      return;
     }
 
     setIsPoseActive(true);
+    setAttemptsPerPose((prev) => ({
+      ...prev,
+      [pose.id]: (prev[pose.id] || 0) + 1,
+    }));
     soundEngine.playChime(440, 1.5);
     
     if (voiceSpeechEnabled) {
-      soundEngine.speak(`Starting ${pose.name}. Hold steady for ${pose.idealHoldDurationSeconds} seconds.`);
+      soundEngine.speak(`Starting ${pose.name}. Hold steady for ${targetHoldDuration} seconds.`);
     }
 
     setPostureAnalysis((prev) => ({
@@ -890,24 +977,30 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     }));
   };
 
-  // Next pose switches to next and announces exact next pose name!
+  // Next pose switches to next based on practitioner's personalized sequence!
   const handleNextPose = () => {
     if (selectedPoseIndex === null) {
-      handleSelectPose(0, true);
+      const firstIdx = personalizedPoses[0]?.originalIndex ?? 0;
+      handleSelectPose(firstIdx, true);
       return;
     }
 
-    if (selectedPoseIndex < ALL_POSES.length - 1) {
-      handleSelectPose(selectedPoseIndex + 1, true);
+    const currentPersonalizedIdx = personalizedPoses.findIndex((p) => p.originalIndex === selectedPoseIndex);
+    if (currentPersonalizedIdx >= 0 && currentPersonalizedIdx < personalizedPoses.length - 1) {
+      const nextPoseItem = personalizedPoses[currentPersonalizedIdx + 1];
+      handleSelectPose(nextPoseItem.originalIndex, true);
     } else {
       handleCompleteSession();
     }
   };
 
-  // Prev pose switches to prev and waits until user is ready!
+  // Prev pose switches to prev based on practitioner's personalized sequence!
   const handlePrevPose = () => {
-    if (selectedPoseIndex !== null && selectedPoseIndex > 0) {
-      handleSelectPose(selectedPoseIndex - 1);
+    if (selectedPoseIndex === null) return;
+    const currentPersonalizedIdx = personalizedPoses.findIndex((p) => p.originalIndex === selectedPoseIndex);
+    if (currentPersonalizedIdx > 0) {
+      const prevPoseItem = personalizedPoses[currentPersonalizedIdx - 1];
+      handleSelectPose(prevPoseItem.originalIndex);
     }
   };
 
@@ -917,15 +1010,17 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
     let finalRecordsMap = { ...poseRecords };
 
-    // Sweep through all poses and include any pose that was actively held or attempted
+    // Sweep through all poses and include ONLY poses held for at least 5 seconds
     ALL_POSES.forEach((p) => {
       const best = bestHoldPerPose[p.id] || 0;
       const attempts = attemptsPerPose[p.id] || 0;
       const isCur = currentPose?.id === p.id;
       const hold = isCur ? Math.max(poseHoldSeconds, best) : best;
-      
-      if (hold > 0 || attempts > 0 || (isCur && isPoseActive && poseHoldSeconds > 0)) {
-        const existing = finalRecordsMap[p.id];
+      const existing = finalRecordsMap[p.id];
+      const totalHold = (existing?.durationSeconds || 0) + (isCur ? poseHoldSeconds : 0);
+
+      // Strict requirement: pose must have been held for at least 5 seconds
+      if (hold >= 5 || totalHold >= 5 || (existing?.bestHoldSeconds || 0) >= 5) {
         finalRecordsMap[p.id] = {
           poseId: p.id,
           pose_id: p.id,
@@ -933,10 +1028,10 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
           pose_name: p.name,
           sanskritName: p.sanskritName || '',
           sanskrit_name: p.sanskritName || '',
-          durationSeconds: (existing?.durationSeconds || 0) + (isCur ? (poseHoldSeconds || hold || 1) : Math.max(1, hold)),
-          duration_seconds: (existing?.durationSeconds || 0) + (isCur ? (poseHoldSeconds || hold || 1) : Math.max(1, hold)),
-          bestHoldSeconds: Math.max(existing?.bestHoldSeconds || 0, best, isCur ? poseHoldSeconds : 0, 1),
-          best_hold_seconds: Math.max(existing?.bestHoldSeconds || 0, best, isCur ? poseHoldSeconds : 0, 1),
+          durationSeconds: Math.max(5, totalHold, hold),
+          duration_seconds: Math.max(5, totalHold, hold),
+          bestHoldSeconds: Math.max(existing?.bestHoldSeconds || 0, best, isCur ? poseHoldSeconds : 0, 5),
+          best_hold_seconds: Math.max(existing?.bestHoldSeconds || 0, best, isCur ? poseHoldSeconds : 0, 5),
           attemptsCount: Math.max(existing?.attemptsCount || 0, attempts, 1),
           attempts_count: Math.max(existing?.attemptsCount || 0, attempts, 1),
           accuracyScore: existing?.accuracyScore || postureAnalysis.score || 92,
@@ -945,12 +1040,17 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
           cues_received: existing?.cuesReceived || postureAnalysis.keyCues || [],
           status: 'completed',
         };
+      } else {
+        // Less than 5 seconds: discard from session record
+        delete finalRecordsMap[p.id];
       }
     });
 
-    const finalRecords: SessionPoseRecord[] = Object.values(finalRecordsMap);
+    const finalRecords: SessionPoseRecord[] = Object.values(finalRecordsMap).filter(
+      (r) => (r.durationSeconds || 0) >= 5 || (r.bestHoldSeconds || 0) >= 5
+    );
 
-    // If no poses were held or recorded, do NOT generate a report or send email; display toast notice
+    // If no poses were held for at least 5 seconds, do NOT generate a report or send email; display toast notice
     if (finalRecords.length === 0) {
       if (onNoPosesPracticed) {
         onNoPosesPracticed();
@@ -1196,6 +1296,21 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
             )}
           </button>
 
+          {/* Precautionary Practice Advisory Button */}
+          <button
+            type="button"
+            onClick={() => setShowFoodAdvisory((prev) => !prev)}
+            className={`px-2 sm:px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none ${
+              showFoodAdvisory
+                ? 'bg-amber-950/80 text-amber-300 border-amber-500/60 ring-2 ring-amber-500/20'
+                : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700 hover:text-white'
+            }`}
+            title="Precautionary Health & Dietary Advisory (Post-Meal Yoga Guidelines)"
+          >
+            <Info className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            
+          </button>
+
           {/* Exit Button */}
           <button
             onClick={() => setShowExitConfirm(true)}
@@ -1205,6 +1320,57 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
           </button>
         </div>
       </header>
+
+      {/* Precautionary Health & Dietary Advisory Banner (Shown when user enters Guest or Authorized Session) */}
+      <AnimatePresence>
+        {showFoodAdvisory && (
+          <motion.div
+            initial={{ opacity: 0, y: -8, scale: 0.99 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.99 }}
+            transition={{ duration: 0.2 }}
+            className="w-full px-2.5 sm:px-4 pt-2.5 shrink-0 z-30"
+          >
+            <div className="max-w-7xl mx-auto px-3.5 py-2.5 sm:py-3 rounded-2xl bg-gradient-to-r from-amber-950/90 via-stone-900/95 to-amber-950/80 border border-amber-500/50 text-stone-200 text-xs shadow-xl backdrop-blur-xl flex items-center justify-between gap-3">
+              <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+                <div className="w-7 h-7 rounded-full bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 shrink-0 mt-0.5 sm:mt-0 shadow-inner">
+                  <Info className="w-4 h-4 text-amber-300" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-amber-300 uppercase tracking-wider text-[10px] sm:text-[11px] bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
+                      Precautionary Practice Advisory
+                    </span>
+                    <span className="text-[10px] text-amber-400/80 font-medium">
+                      Mindful Digestion &amp; Safety Precaution
+                    </span>
+                  </div>
+                  <p className="text-[11px] sm:text-xs text-stone-200 mt-0.5 leading-relaxed">
+                    <strong>Do not perform yoga postures immediately after eating.</strong> Allow at least <span className="font-semibold text-amber-300">2 to 3 hours</span> after a full meal (or <span className="font-semibold text-amber-300">45 to 60 minutes</span> after a light snack) before practicing. Practicing on a full stomach can lead to digestive discomfort, reflux, cramping, or nausea.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowFoodAdvisory(false)}
+                  className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 hover:text-white border border-amber-500/40 text-[11px] font-semibold transition cursor-pointer shadow-xs"
+                >
+                  Understood
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFoodAdvisory(false)}
+                  className="p-1 rounded-lg text-stone-400 hover:text-stone-200 hover:bg-stone-800 transition cursor-pointer"
+                  title="Close advisory"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ========================================================================= */}
       {/* MAIN EXPANDED WORKSPACE (Increased Stage Height h-[88vh] / min-h-[750px]) */}
@@ -1271,11 +1437,52 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                   <h3 className="text-base sm:text-lg font-serif font-bold text-white">
                     Are you ready to boost your day by doing yoga?
                   </h3>
-                  <p className="text-xs text-stone-400 leading-relaxed">
-                    {currentPose 
-                      ? `You selected ${currentPose.name}. Click 'I'm Ready' below or speak voice commands to enable camera and start the posture timer.`
-                      : 'Choose any of the 8 asanas from the drawer on the right (or say "Warrior 3" / "Tree Pose") to get started!'}
-                  </p>
+                  {isCurrentPoseLocked ? (
+                    <div className="p-3 rounded-2xl bg-gradient-to-br from-amber-950/70 via-stone-900 to-amber-950/50 border border-amber-500/50 text-left space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0 border border-amber-400/30">
+                          <Lock className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-amber-200">
+                            Guest Mode: {currentPose.name} is Locked
+                          </h4>
+                          <p className="text-[11px] text-stone-300 leading-relaxed mt-0.5">
+                            You are practicing in guest mode. Please try our 3 free poses (Downward Dog, Warrior II, Tree Pose), or sign up to unlock all poses.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-stone-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 text-[11px] text-amber-300 font-medium">
+                          <span>Select free poses in the shelf to the right</span>
+                          <ArrowRight className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={onOpenAuth}
+                          className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] transition cursor-pointer shadow-xs flex items-center gap-1.5 justify-center"
+                        >
+                          <span>Sign Up to Unlock</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-stone-400 leading-relaxed">
+                      {currentPose 
+                        ? `You selected ${currentPose.name}. Turn on camera, step into position, then click 'I'm Ready' to begin.`
+                        : 'Choose any of the 8 asanas from the drawer on the right to get started!'}
+                    </p>
+                  )}
+
+                  {/* Dietary Precaution in Greeting Card */}
+                  <div className="p-2 sm:p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/30 flex items-start gap-2 text-left">
+                    <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                    <p className="text-[10px] sm:text-[11px] text-amber-200/90 leading-relaxed">
+                      <strong className="text-amber-300">Practice Precaution:</strong> Please do not practice yoga on a full stomach. Wait 2–3 hours after meals (or 45–60 mins after a snack) before practicing.
+                    </p>
+                  </div>
 
                   {/* Camera Notice / Fallback helper if error */}
                   {cameraPermissionError && (
@@ -1303,6 +1510,9 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               currentPose={currentPose}
               isPoseActive={isPoseActive}
               cameraActive={cameraActive}
+              isStartingCamera={isStartingCamera}
+              isCurrentPoseLocked={isCurrentPoseLocked}
+              onOpenAuth={onOpenAuth}
               videoFitMode={videoFitMode}
               modelPoseResult={modelPoseResult}
               postureAnalysis={postureAnalysis}
@@ -1330,26 +1540,75 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
             <div className="flex items-center gap-2 flex-wrap">
               {/* Ready / Play / Pause Toggle Button */}
               {currentPose && (
-                <button
-                  onClick={() => isPoseActive ? setIsPoseActive(false) : handleConfirmReadyAndStart()}
-                  className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm ${
-                    isPoseActive 
-                      ? 'bg-amber-600 hover:bg-amber-500 text-white' 
-                      : 'bg-emerald-600 hover:bg-emerald-500 text-white animate-pulse'
-                  }`}
-                >
-                  {isPoseActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-white" />}
-                  <span>{isPoseActive ? 'Pause Pose' : `Ready • Start ${currentPose.name}`}</span>
-                </button>
+                isCurrentPoseLocked ? (
+                  <button
+                    type="button"
+                    onClick={onOpenAuth}
+                    className="px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm bg-amber-600 hover:bg-amber-500 text-white"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Unlock Pose (Sign Up)</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => isPoseActive ? setIsPoseActive(false) : handleConfirmReadyAndStart()}
+                    disabled={isStartingCamera}
+                    className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm ${
+                      isPoseActive 
+                        ? 'bg-amber-600 hover:bg-amber-500 text-white' 
+                        : cameraActive
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white animate-pulse'
+                        : 'bg-stone-800 hover:bg-stone-700 text-stone-300'
+                    }`}
+                  >
+                    {isPoseActive ? (
+                      <>
+                        <Pause className="w-3.5 h-3.5" />
+                        <span>Pause Pose</span>
+                      </>
+                    ) : isStartingCamera ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-200" />
+                        <span>Starting Camera...</span>
+                      </>
+                    ) : !cameraActive ? (
+                      <>
+                        <Play className="w-3.5 h-3.5 text-stone-400" />
+                        <span>Turn On Camera First</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3.5 h-3.5 fill-white" />
+                        <span>I&apos;m Ready • Start {currentPose.name}</span>
+                      </>
+                    )}
+                  </button>
+                )
               )}
 
-              {/* Camera Toggle */}
+              {/* Distinct Turn On / Off Camera Button */}
               <button
+                type="button"
                 onClick={cameraActive ? stopCamera : startCamera}
-                className="px-3 py-2 rounded-xl bg-gradient-to-r from-stone-800 to-stone-700 hover:from-stone-700 hover:to-stone-600 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-stone-600 shadow-sm"
+                disabled={isStartingCamera}
+                className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border shadow-sm ${
+                  cameraActive
+                    ? 'bg-stone-800 hover:bg-stone-700 text-rose-300 border-rose-500/40'
+                    : 'bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white border-emerald-500/50'
+                }`}
               >
-                {cameraActive ? <CameraOff className="w-3.5 h-3.5 text-rose-400" /> : <Camera className="w-3.5 h-3.5 text-emerald-400" />}
-                <span>{cameraActive ? 'Camera Off' : 'Camera On'}</span>
+                {cameraActive ? (
+                  <>
+                    <CameraOff className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Turn Off Camera</span>
+                  </>
+                ) : (
+                  <>
+                    <Camera className="w-3.5 h-3.5 text-emerald-300" />
+                    <span>Turn On Camera</span>
+                  </>
+                )}
               </button>
 
               {/* Full Body Fit Framing Toggle */}
@@ -1498,33 +1757,42 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handlePrevPose}
-                disabled={selectedPoseIndex === null || selectedPoseIndex === 0}
-                className="px-3 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-40 text-stone-300 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" /> Prev
-              </button>
+            {/* Prev / Sequence / Next Buttons following personalized progression */}
+            {(() => {
+              const currentPersonalizedIdx = selectedPoseIndex !== null
+                ? personalizedPoses.findIndex((p) => p.originalIndex === selectedPoseIndex)
+                : -1;
 
-              <span className="text-xs text-stone-400 font-mono px-1">
-                {selectedPoseIndex !== null ? `${selectedPoseIndex + 1}/${ALL_POSES.length}` : '0/8'}
-              </span>
+              return (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handlePrevPose}
+                    disabled={selectedPoseIndex === null || currentPersonalizedIdx <= 0}
+                    className="px-3 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-40 text-stone-300 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" /> Prev
+                  </button>
 
-              <button
-                onClick={handleNextPose}
-                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white text-xs font-bold flex items-center gap-1 transition cursor-pointer"
-              >
-                <span>
-                  {selectedPoseIndex === null
-                    ? 'Start Pose'
-                    : selectedPoseIndex === ALL_POSES.length - 1
-                    ? 'Finish Practice'
-                    : `Next: ${ALL_POSES[selectedPoseIndex + 1]?.name}`}
-                </span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                  <span className="text-xs text-stone-400 font-mono px-1">
+                    {currentPersonalizedIdx >= 0 ? `${currentPersonalizedIdx + 1}/${ALL_POSES.length}` : `0/${ALL_POSES.length}`}
+                  </span>
+
+                  <button
+                    onClick={handleNextPose}
+                    className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                  >
+                    <span>
+                      {selectedPoseIndex === null
+                        ? `Start: ${personalizedPoses[0]?.pose.name || 'First Pose'}`
+                        : currentPersonalizedIdx === personalizedPoses.length - 1
+                        ? 'Finish Practice'
+                        : `Next: ${personalizedPoses[currentPersonalizedIdx + 1]?.pose.name || 'Next'}`}
+                    </span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -1558,12 +1826,15 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               poseRecords={poseRecords}
               isPoseActive={isPoseActive}
               poseGridScrollRef={poseGridScrollRef}
+              userProfile={userProfile}
+              poseRotationOffset={poseRotationOffset}
               onCloseDrawer={() => setIsDrawerOpen(false)}
               onSetDrawerShelfMode={setDrawerShelfMode}
               onSetActiveCardTab={setActiveCardTab}
               onSetReferenceDisplayMode={setReferenceDisplayMode}
               onSelectPose={handleSelectPose}
               onConfirmReadyAndStart={handleConfirmReadyAndStart}
+              onOpenAuth={onOpenAuth}
             />
           ) : showVoiceCmdTable ? (
             <motion.div

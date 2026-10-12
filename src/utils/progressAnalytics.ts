@@ -62,50 +62,25 @@ export function generateLast30DaysSlots(): { dateKey: string; displayDate: strin
   return slots;
 }
 
-/**
- * Generate sensible baseline demo trend data when user is new or has very few recorded sessions,
- * ensuring the visual chart is immediately rich, motivating, and interactive.
- */
-function generateSensibleBaseline(
-  slots: { dateKey: string; displayDate: string; fullDate: string; dayIndex: number }[],
-  userExperience: string = 'Beginner'
-): DailyTrendPoint[] {
-  // Baseline progression curve (starting ~72-78% moving up to ~88-94%)
-  const baseStart = userExperience === 'Advanced' ? 84 : userExperience === 'Intermediate' ? 78 : 72;
-  const targetEnd = userExperience === 'Advanced' ? 96 : userExperience === 'Intermediate' ? 91 : 86;
-  
-  // Predictable pattern of practice days (every 1-2 days)
-  const activePattern = [1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1];
 
-  return slots.map((slot, idx) => {
-    const progressFactor = idx / 29;
-    const isPracticeDay = activePattern[idx % activePattern.length] === 1;
-    const sessionCount = isPracticeDay ? (idx % 7 === 0 ? 2 : 1) : 0;
-    
-    // Smooth upward accuracy curve with gentle realistic variance (+/- 3%)
-    const pseudoRandom = Math.sin(idx * 1.7) * 2.8;
-    const calculatedAcc = Math.min(100, Math.max(50, Math.round(baseStart + (targetEnd - baseStart) * progressFactor + pseudoRandom)));
-    const minutes = isPracticeDay ? (sessionCount === 2 ? 25 : 15 + (idx % 3) * 5) : 0;
-
-    return {
-      dateKey: slot.dateKey,
-      displayDate: slot.displayDate,
-      fullDate: slot.fullDate,
-      dayIndex: slot.dayIndex,
-      sessionCount,
-      avgAccuracy: calculatedAcc,
-      totalMinutes: minutes,
-      hasActivity: isPracticeDay,
-    };
-  });
+export interface ProgressTrendsSummary {
+  trendData: DailyTrendPoint[];
+  totalSessions30d: number;
+  totalMinutes30d: number;
+  avgAccuracy30d: number;
+  activeDaysCount: number;
+  consistencyPercentage: number;
+  accuracyTrendDelta: number;
+  hasData: boolean;
 }
 
 /**
  * Aggregates user's stored practice sessions into 30 daily buckets for Recharts.
+ * Honest aggregation: returns zero/empty state when no sessions have been recorded.
  */
 export function aggregate30DayProgressTrends(
   sessions: PracticeSession[],
-  userExperience: string = 'Beginner'
+  _userExperience: string = 'Beginner'
 ): ProgressTrendsSummary {
   const slots = generateLast30DaysSlots();
   const slotMap = new Map<string, { sessions: number; scores: number[]; durationSec: number }>();
@@ -119,85 +94,70 @@ export function aggregate30DayProgressTrends(
   const thirtyDaysAgoTime = Date.now() - 30 * 24 * 60 * 60 * 1000;
   let realSessionsInWindowCount = 0;
 
-  sessions.forEach((s) => {
-    const rawTime = s.startTime ?? (s as any).start_time ?? (s as any).createdAt ?? (s as any).created_at;
-    const timestamp = typeof rawTime === 'number' ? rawTime : rawTime ? new Date(rawTime).getTime() : null;
-    
-    if (timestamp && timestamp >= thirtyDaysAgoTime) {
-      const key = toDateKey(timestamp);
-      if (slotMap.has(key)) {
-        realSessionsInWindowCount++;
-        const entry = slotMap.get(key)!;
-        entry.sessions += 1;
-        
-        const accuracy = Number(s.overallAccuracy ?? (s as any).overall_accuracy ?? 0);
-        if (!isNaN(accuracy) && accuracy > 0) {
-          entry.scores.push(accuracy);
-        }
-        
-        const duration = Number(s.totalDurationSeconds ?? (s as any).total_duration_seconds ?? 0);
-        if (!isNaN(duration) && duration > 0) {
-          entry.durationSec += duration;
-        }
-      }
-    }
-  });
-
-  // If user has less than 2 recorded sessions in the 30-day window, provide the smooth baseline
-  // overlay combined with any real sessions they have recorded.
-  if (realSessionsInWindowCount < 2) {
-    const baseline = generateSensibleBaseline(slots, userExperience);
-    
-    // Inject real sessions if any exist
+  if (Array.isArray(sessions)) {
     sessions.forEach((s) => {
-      const rawTime = s.startTime ?? (s as any).start_time;
-      if (rawTime) {
-        const key = toDateKey(rawTime);
-        const pt = baseline.find((b) => b.dateKey === key);
-        if (pt) {
-          pt.sessionCount = Math.max(pt.sessionCount, 1);
-          pt.hasActivity = true;
-          const acc = Number(s.overallAccuracy ?? (s as any).overall_accuracy);
-          if (!isNaN(acc) && acc > 0) {
-            pt.avgAccuracy = Math.round((pt.avgAccuracy + acc) / 2);
+      if (!s) return;
+      const rawTime = s.startTime ?? (s as any).start_time ?? (s as any).createdAt ?? (s as any).created_at;
+      const timestamp = typeof rawTime === 'number' ? rawTime : rawTime ? new Date(rawTime).getTime() : null;
+      
+      if (timestamp && timestamp >= thirtyDaysAgoTime) {
+        const key = toDateKey(timestamp);
+        if (slotMap.has(key)) {
+          realSessionsInWindowCount++;
+          const entry = slotMap.get(key)!;
+          entry.sessions += 1;
+          
+          const accuracy = Number(s.overallAccuracy ?? (s as any).overall_accuracy ?? 0);
+          if (!isNaN(accuracy) && accuracy > 0) {
+            entry.scores.push(accuracy);
+          }
+          
+          const duration = Number(s.totalDurationSeconds ?? (s as any).total_duration_seconds ?? 0);
+          if (!isNaN(duration) && duration > 0) {
+            entry.durationSec += duration;
           }
         }
       }
     });
+  }
 
-    const activeDays = baseline.filter((b) => b.hasActivity).length;
-    const totalSess = baseline.reduce((acc, b) => acc + b.sessionCount, 0);
-    const totalMins = baseline.reduce((acc, b) => acc + b.totalMinutes, 0);
-    const activePoints = baseline.filter((b) => b.hasActivity);
-    const avgScore = activePoints.length > 0
-      ? Math.round(activePoints.reduce((acc, b) => acc + b.avgAccuracy, 0) / activePoints.length)
-      : 82;
-
-    const firstHalfAvg = baseline.slice(0, 15).reduce((acc, b) => acc + b.avgAccuracy, 0) / 15;
-    const secondHalfAvg = baseline.slice(15).reduce((acc, b) => acc + b.avgAccuracy, 0) / 15;
-    const delta = Math.round(secondHalfAvg - firstHalfAvg);
+  // If user has NO recorded sessions in the window: return clean honest empty summary
+  if (realSessionsInWindowCount === 0) {
+    const emptyTrendData: DailyTrendPoint[] = slots.map((slot) => ({
+      dateKey: slot.dateKey,
+      displayDate: slot.displayDate,
+      fullDate: slot.fullDate,
+      dayIndex: slot.dayIndex,
+      sessionCount: 0,
+      avgAccuracy: 0,
+      totalMinutes: 0,
+      hasActivity: false,
+    }));
 
     return {
-      trendData: baseline,
-      totalSessions30d: totalSess,
-      totalMinutes30d: totalMins,
-      avgAccuracy30d: avgScore,
-      activeDaysCount: activeDays,
-      consistencyPercentage: Math.round((activeDays / 30) * 100),
-      accuracyTrendDelta: delta >= 0 ? delta : 4,
+      trendData: emptyTrendData,
+      totalSessions30d: 0,
+      totalMinutes30d: 0,
+      avgAccuracy30d: 0,
+      activeDaysCount: 0,
+      consistencyPercentage: 0,
+      accuracyTrendDelta: 0,
+      hasData: false,
     };
   }
 
-  // Otherwise, compile from real recorded sessions
-  let lastKnownAccuracy = 75;
+  // Compile from real recorded sessions
+  let lastKnownAccuracy = 0;
   const trendData: DailyTrendPoint[] = slots.map((slot) => {
     const data = slotMap.get(slot.dateKey) || { sessions: 0, scores: [], durationSec: 0 };
     const hasActivity = data.sessions > 0;
     
-    let avgAcc = lastKnownAccuracy;
+    let avgAcc = 0;
     if (data.scores.length > 0) {
       avgAcc = Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length);
       lastKnownAccuracy = avgAcc;
+    } else if (hasActivity) {
+      avgAcc = lastKnownAccuracy;
     }
 
     return {
@@ -215,16 +175,16 @@ export function aggregate30DayProgressTrends(
   const activeDays = trendData.filter((t) => t.hasActivity).length;
   const totalSess = trendData.reduce((acc, t) => acc + t.sessionCount, 0);
   const totalMins = trendData.reduce((acc, t) => acc + t.totalMinutes, 0);
-  const activePoints = trendData.filter((t) => t.hasActivity);
+  const activePoints = trendData.filter((t) => t.hasActivity && t.avgAccuracy > 0);
   const avgScore = activePoints.length > 0
     ? Math.round(activePoints.reduce((acc, t) => acc + t.avgAccuracy, 0) / activePoints.length)
-    : 80;
+    : 0;
 
-  const firstHalf = trendData.slice(0, 15);
-  const secondHalf = trendData.slice(15);
-  const firstAvg = firstHalf.length ? firstHalf.reduce((a, b) => a + b.avgAccuracy, 0) / firstHalf.length : 80;
-  const secondAvg = secondHalf.length ? secondHalf.reduce((a, b) => a + b.avgAccuracy, 0) / secondHalf.length : 80;
-  const delta = Math.round(secondAvg - firstAvg);
+  const firstHalf = trendData.slice(0, 15).filter((t) => t.hasActivity && t.avgAccuracy > 0);
+  const secondHalf = trendData.slice(15).filter((t) => t.hasActivity && t.avgAccuracy > 0);
+  const firstAvg = firstHalf.length ? firstHalf.reduce((a, b) => a + b.avgAccuracy, 0) / firstHalf.length : 0;
+  const secondAvg = secondHalf.length ? secondHalf.reduce((a, b) => a + b.avgAccuracy, 0) / secondHalf.length : 0;
+  const delta = (firstHalf.length > 0 && secondHalf.length > 0) ? Math.round(secondAvg - firstAvg) : 0;
 
   return {
     trendData,
@@ -234,5 +194,6 @@ export function aggregate30DayProgressTrends(
     activeDaysCount: activeDays,
     consistencyPercentage: Math.round((activeDays / 30) * 100),
     accuracyTrendDelta: delta,
+    hasData: true,
   };
 }

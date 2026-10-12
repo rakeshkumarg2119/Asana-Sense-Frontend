@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Music, Upload, Play, Pause, Disc3, Plus, Trash2, X } from 'lucide-react';
+import { Volume2, VolumeX, Music, Upload, Play, Pause, Disc3, Plus, Trash2, X, AlertTriangle, AlertCircle, Loader2 } from 'lucide-react';
+import { 
+  StoredSoundscape, 
+  saveSoundscapeToDB, 
+  loadAllSoundscapesFromDB, 
+  deleteSoundscapeFromDB 
+} from '../utils/audioStorage';
 
 interface AmbientAudioPlayerProps {
   className?: string;
@@ -7,15 +13,6 @@ interface AmbientAudioPlayerProps {
   iconOnly?: boolean;
   dropdownDirection?: 'up' | 'down';
 }
-
-export interface CustomTrack {
-  id: string;
-  name: string;
-  subtitle: string;
-  url: string;
-}
-
-const STORAGE_CUSTOM_TRACKS = 'asana_custom_soundscapes_v1';
 
 export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
   className = '',
@@ -26,26 +23,15 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0.5);
   const [isMuted, setIsMuted] = useState(false);
-  
-  // Custom user tracks list (no hardcoded presets)
-  const [tracks, setTracks] = useState<CustomTrack[]>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_CUSTOM_TRACKS);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [isLoadingTracks, setIsLoadingTracks] = useState(true);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
 
-  const [activeTrackId, setActiveTrackId] = useState<string | null>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_CUSTOM_TRACKS);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return parsed.length > 0 ? parsed[0].id : null;
-    } catch {
-      return null;
-    }
-  });
+  // Persistent tracks stored via IndexedDB
+  const [tracks, setTracks] = useState<StoredSoundscape[]>([]);
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+
+  // Delete Confirmation state
+  const [trackToDelete, setTrackToDelete] = useState<StoredSoundscape | null>(null);
 
   const [urlInput, setUrlInput] = useState('');
   const [showUrlAdd, setShowUrlAdd] = useState(false);
@@ -54,15 +40,33 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Save tracks to localStorage
-  const saveTracksToStorage = (updatedTracks: CustomTrack[]) => {
-    setTracks(updatedTracks);
-    try {
-      localStorage.setItem(STORAGE_CUSTOM_TRACKS, JSON.stringify(updatedTracks));
-    } catch (e) {
-      console.warn('[AmbientAudio] Failed to persist tracks to storage:', e);
+  // Load persisted tracks from IndexedDB on component mount
+  useEffect(() => {
+    let isMounted = true;
+    async function loadTracks() {
+      try {
+        setIsLoadingTracks(true);
+        const stored = await loadAllSoundscapesFromDB();
+        if (isMounted) {
+          setTracks(stored);
+          if (stored.length > 0 && !activeTrackId) {
+            setActiveTrackId(stored[0].id);
+          }
+        }
+      } catch (err) {
+        console.warn('[AmbientAudio] Error loading stored soundscapes:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoadingTracks(false);
+        }
+      }
     }
-  };
+    loadTracks();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Sync volume with HTMLAudioElement
   useEffect(() => {
@@ -76,6 +80,7 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
     const track = tracks.find((t) => t.id === trackId);
     if (!track) return;
 
+    setPlaybackError(null);
     setActiveTrackId(trackId);
     setIsPlaying(true);
 
@@ -83,6 +88,8 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
       audioElementRef.current.src = track.url;
       audioElementRef.current.play().catch((err) => {
         console.warn('[AmbientAudio] Play error:', err);
+        setPlaybackError('Could not play audio. Tap play again or re-select track.');
+        setIsPlaying(false);
       });
     }
   };
@@ -113,59 +120,102 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
     }
   };
 
-  // Handle local user file upload
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle local user file upload with IndexedDB persistence
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const fileUrl = URL.createObjectURL(file);
-    const newTrack: CustomTrack = {
-      id: 'trk_' + Date.now(),
-      name: file.name.replace(/\.[^/.]+$/, ''),
-      subtitle: `Local Audio (${(file.size / (1024 * 1024)).toFixed(1)} MB)`,
-      url: fileUrl,
-    };
+    setPlaybackError(null);
+    try {
+      const newTrack = await saveSoundscapeToDB({
+        id: 'trk_' + Date.now(),
+        name: file.name.replace(/\.[^/.]+$/, ''),
+        subtitle: `Local Audio (${(file.size / (1024 * 1024)).toFixed(1)} MB)`,
+        type: 'file',
+        blob: file,
+        sizeBytes: file.size,
+      });
 
-    const updated = [...tracks, newTrack];
-    saveTracksToStorage(updated);
-    setActiveTrackId(newTrack.id);
-    setIsPlaying(true);
+      const updated = [...tracks, newTrack];
+      setTracks(updated);
+      setActiveTrackId(newTrack.id);
+      setIsPlaying(true);
 
-    if (audioElementRef.current) {
-      audioElementRef.current.src = fileUrl;
-      audioElementRef.current.play().catch(console.warn);
+      if (audioElementRef.current) {
+        audioElementRef.current.src = newTrack.url;
+        audioElementRef.current.play().catch((err) => {
+          console.warn('[AmbientAudio] Auto-play blocked:', err);
+        });
+      }
+    } catch (err) {
+      console.error('[AmbientAudio] Failed to persist file in IndexedDB:', err);
+      setPlaybackError('Failed to save audio file to device storage.');
+    } finally {
+      // Clear input so same file can be re-selected if wanted
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
   // Handle adding custom URL stream
-  const handleAddUrlTrack = () => {
+  const handleAddUrlTrack = async () => {
     const trimmed = urlInput.trim();
     if (!trimmed) return;
 
-    const newTrack: CustomTrack = {
-      id: 'url_' + Date.now(),
-      name: `Stream ${tracks.length + 1}`,
-      subtitle: 'External Audio Stream',
-      url: trimmed,
-    };
+    setPlaybackError(null);
+    try {
+      const newTrack = await saveSoundscapeToDB({
+        id: 'url_' + Date.now(),
+        name: `Stream ${tracks.length + 1}`,
+        subtitle: 'External Audio Stream',
+        type: 'url',
+        remoteUrl: trimmed,
+      });
 
-    const updated = [...tracks, newTrack];
-    saveTracksToStorage(updated);
-    setActiveTrackId(newTrack.id);
-    setUrlInput('');
-    setShowUrlAdd(false);
-    playTrack(newTrack.id);
+      const updated = [...tracks, newTrack];
+      setTracks(updated);
+      setActiveTrackId(newTrack.id);
+      setUrlInput('');
+      setShowUrlAdd(false);
+      playTrack(newTrack.id);
+    } catch (err) {
+      console.error('[AmbientAudio] Failed to save URL track:', err);
+      setPlaybackError('Failed to save stream URL.');
+    }
   };
 
-  // Delete track
-  const handleDeleteTrack = (id: string, e: React.MouseEvent) => {
+  // Prompt delete confirmation
+  const handleRequestDelete = (track: StoredSoundscape, e: React.MouseEvent) => {
     e.stopPropagation();
+    setTrackToDelete(track);
+  };
+
+  // Confirmed delete
+  const handleConfirmDelete = async () => {
+    if (!trackToDelete) return;
+
+    const id = trackToDelete.id;
+    await deleteSoundscapeFromDB(id);
+
+    // Revoke object URL to prevent memory leak
+    if (trackToDelete.type === 'file' && trackToDelete.url.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(trackToDelete.url);
+      } catch {
+        // ignore
+      }
+    }
+
     const updated = tracks.filter((t) => t.id !== id);
-    saveTracksToStorage(updated);
+    setTracks(updated);
+
     if (activeTrackId === id) {
       stopPlayback();
       setActiveTrackId(updated.length > 0 ? updated[0].id : null);
     }
+
+    setTrackToDelete(null);
   };
 
   const activeTrack = tracks.find((t) => t.id === activeTrackId);
@@ -178,6 +228,10 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
         loop
         onEnded={() => {
           if (audioElementRef.current) audioElementRef.current.play();
+        }}
+        onError={() => {
+          setPlaybackError('Playback error occurred. File may be unavailable.');
+          setIsPlaying(false);
         }}
       />
 
@@ -222,7 +276,7 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
           dropdownDirection === 'up' 
             ? 'bottom-full right-0 mb-2' 
             : 'top-full right-0 mt-2'
-        } w-72 sm:w-84 bg-stone-900/95 border border-emerald-500/40 rounded-2xl shadow-2xl p-4 z-50 backdrop-blur-xl text-stone-100 space-y-3.5 animate-in fade-in zoom-in-95 duration-150`}>
+        } w-76 sm:w-88 bg-stone-900/98 border border-emerald-500/40 rounded-2xl shadow-2xl p-4 z-50 backdrop-blur-xl text-stone-100 space-y-3.5 animate-in fade-in zoom-in-95 duration-150`}>
           {/* Header */}
           <div className="flex items-center justify-between border-b border-stone-800 pb-2">
             <div className="flex items-center gap-2">
@@ -231,7 +285,7 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
                 <h4 className="text-xs font-bold text-white uppercase tracking-wider">
                   Sanctuary Soundscapes
                 </h4>
-                <p className="text-[10px] text-stone-400">Meditative Background Audio</p>
+                <p className="text-[10px] text-stone-400">Persistent Local Background Audio</p>
               </div>
             </div>
             <button
@@ -241,6 +295,20 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
+
+          {/* Playback Error Warning if any */}
+          {playbackError && (
+            <div className="p-2 rounded-xl bg-amber-950/80 border border-amber-500/50 flex items-center gap-2 text-amber-200 text-[11px]">
+              <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="flex-1">{playbackError}</span>
+              <button
+                onClick={() => setPlaybackError(null)}
+                className="text-amber-400 hover:text-white p-0.5"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
 
           {/* Current Playing Track Banner */}
           <div className="p-2.5 rounded-xl bg-stone-950/80 border border-stone-800 flex items-center justify-between gap-2">
@@ -304,7 +372,7 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <span className="text-[10px] uppercase font-bold text-stone-400 tracking-wider">
-                Soundscape Library ({tracks.length})
+                Saved Soundscapes ({tracks.length})
               </span>
               <button
                 type="button"
@@ -337,7 +405,12 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
             )}
 
             {/* Tracks List */}
-            {tracks.length > 0 ? (
+            {isLoadingTracks ? (
+              <div className="p-4 text-center flex items-center justify-center gap-2 text-stone-400 text-xs">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                <span>Loading sound library...</span>
+              </div>
+            ) : tracks.length > 0 ? (
               <div className="space-y-1 max-h-36 overflow-y-auto pr-1 custom-scrollbar">
                 {tracks.map((track) => {
                   const isSelected = activeTrackId === track.id;
@@ -361,11 +434,11 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
                         )}
                         <button
                           type="button"
-                          onClick={(e) => handleDeleteTrack(track.id, e)}
-                          className="p-1 rounded text-stone-500 hover:text-rose-400 transition"
+                          onClick={(e) => handleRequestDelete(track, e)}
+                          className="p-1 rounded text-stone-500 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer"
                           title="Remove Track"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
@@ -374,8 +447,8 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
               </div>
             ) : (
               <div className="p-3 rounded-xl bg-stone-950/50 border border-stone-800/80 text-center space-y-1">
-                <p className="text-[11px] text-stone-400">No ambient tracks added yet.</p>
-                <p className="text-[10px] text-stone-500">Upload your own meditation audio or drone files.</p>
+                <p className="text-[11px] text-stone-400">No soundscapes saved yet.</p>
+                <p className="text-[10px] text-stone-500">Upload your own meditation audio. It persists across sessions!</p>
               </div>
             )}
           </div>
@@ -391,8 +464,49 @@ export const AmbientAudioPlayer: React.FC<AmbientAudioPlayerProps> = ({
               <span>Upload Custom Audio File</span>
             </button>
             <p className="text-[9px] text-stone-400 text-center mt-1">
-              Supports MP3, WAV, AAC, M4A, and OGG from your device.
+              Supports MP3, WAV, AAC, M4A, and OGG stored locally on your device.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Soundscape Confirmation Dialog Modal */}
+      {trackToDelete && (
+        <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm bg-stone-900 border border-stone-700/80 rounded-2xl p-5 shadow-2xl text-stone-100 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-bold text-white">Remove Soundscape?</h4>
+                <p className="text-xs text-stone-400 truncate mt-0.5">
+                  &ldquo;{trackToDelete.name}&rdquo;
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-300 leading-relaxed">
+              Are you sure you want to remove this soundscape from your library? It will be permanently deleted from your browser&apos;s local storage.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-stone-800">
+              <button
+                type="button"
+                onClick={() => setTrackToDelete(null)}
+                className="px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-semibold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition cursor-pointer shadow-md flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Track</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

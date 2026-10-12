@@ -32,6 +32,7 @@ import { fetchPosesFromAPI, ALL_POSES } from './data/yogaPoses';
 import { soundEngine } from './utils/audioFeedback';
 import { isMobileDevice } from './utils/deviceDetection';
 import { MobileDesktopNoticeModal } from './components/MobileDesktopNoticeModal';
+import { getSessionRotationOffset, incrementSessionRotationOffset } from './utils/poseRecommendations';
 
 export default function App() {
   // 404 Route state
@@ -50,34 +51,169 @@ export default function App() {
   // User profile & auth state
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
+  // Dynamic Pose Rotation Offset (shifts pose displays forward after exiting sessions, for both guests and accounts)
+  const [poseRotationOffset, setPoseRotationOffset] = useState<number>(() => getSessionRotationOffset());
+
+  // Listen to external rotation updates
+  useEffect(() => {
+    const handleRotationChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<{ offset: number }>;
+      if (customEvent.detail && typeof customEvent.detail.offset === 'number') {
+        setPoseRotationOffset(customEvent.detail.offset);
+      } else {
+        setPoseRotationOffset(getSessionRotationOffset());
+      }
+    };
+    window.addEventListener('asana_pose_rotation_changed', handleRotationChanged);
+    return () => window.removeEventListener('asana_pose_rotation_changed', handleRotationChanged);
+  }, []);
+
   // Welcome new signup toast
   const [welcomeToast, setWelcomeToast] = useState<{ name: string; email: string } | null>(null);
 
   // Empty session notice toast
   const [emptySessionNotice, setEmptySessionNotice] = useState<string | null>(null);
 
+  // Precautionary health & dietary advisory banner state
+  const [homeAdvisoryDismissed, setHomeAdvisoryDismissed] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('asana_dietary_advisory_dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Backend offline modal state & background auto-recovery polling
   // Backend offline modal state & background auto-recovery polling
   const [serverDownModalOpen, setServerDownModalOpen] = useState(false);
   const [isRetryingConnection, setIsRetryingConnection] = useState(false);
   const [pendingPoseAfterCheck, setPendingPoseAfterCheck] = useState<string | undefined>(undefined);
   const [autoPollAttempts, setAutoPollAttempts] = useState(0);
+  const [coldStartSeconds, setColdStartSeconds] = useState(0);
 
-  // Console Command Interface for Developer Settings & Cold-Start Monitoring
+  // Cold-start timer for UI feedback
+  useEffect(() => {
+    if (!serverDownModalOpen) {
+      setColdStartSeconds(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setColdStartSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [serverDownModalOpen]);
+
+  // Console Command Interface for Developer Settings & Cold-Start Management
   useEffect(() => {
     const openSettings = () => {
       setBackendSettingsOpen(true);
-      return 'Opened Asana Sense Developer Settings';
+      console.log('%c[AsanaSense]%c Settings modal opened.', 'color: #059669; font-weight: bold;', 'color: inherit;');
+      return 'Opened Asana Sense Settings Modal';
     };
 
+    const closeSettings = () => {
+      setBackendSettingsOpen(false);
+      console.log('%c[AsanaSense]%c Settings modal closed.', 'color: #059669; font-weight: bold;', 'color: inherit;');
+      return 'Closed Asana Sense Settings Modal';
+    };
+
+    const startColdWakeSequence = async () => {
+      const targetUrl = getBackendUrl();
+      console.log(
+        `%c[AsanaSense Server]%c 🚀 Initiating active wake-up ping sequence for %c${targetUrl}`,
+        'color: #0284c7; font-weight: bold;',
+        'color: inherit;',
+        'color: #059669; font-weight: bold;'
+      );
+      console.info(
+        '%c[AsanaSense Server]%c Cloud servers take 30–50s to wake up from rest. Pinging /api/health every 3s until online...',
+        'color: #d97706; font-weight: bold;',
+        'color: inherit;'
+      );
+
+      let attempts = 0;
+      const startMs = Date.now();
+
+      return new Promise<{ online: boolean; totalSeconds: number; attempts: number }>((resolve) => {
+        // Immediate first check
+        void (async () => {
+          try {
+            const immediateOk = await apiHealthCheck();
+            if (immediateOk) {
+              console.log(
+                '%c[AsanaSense Server]%c ✅ Server is ALREADY online and ready! (200 OK)',
+                'color: #059669; font-weight: bold;',
+                'color: inherit;'
+              );
+              setServerDownModalOpen(false);
+              resolve({ online: true, totalSeconds: 0, attempts: 1 });
+              return;
+            }
+          } catch {
+            // continue to loop
+          }
+        })();
+
+        const intervalId = setInterval(async () => {
+          attempts++;
+          const elapsed = Math.round((Date.now() - startMs) / 1000);
+          try {
+            const isOnline = await apiHealthCheck();
+            if (isOnline) {
+              clearInterval(intervalId);
+              console.log(
+                `%c[AsanaSense Server]%c ✅ Server is awake and connected! (200 OK after ${elapsed}s across ${attempts} pings)`,
+                'color: #059669; font-weight: bold;',
+                'color: inherit;'
+              );
+              setServerDownModalOpen(false);
+              soundEngine.playChime(660, 0.8);
+              resolve({ online: true, totalSeconds: elapsed, attempts });
+              return;
+            }
+          } catch {
+            // Still spinning up
+          }
+
+          console.log(
+            `[AsanaSense Server] ⏳ Ping #${attempts} (${elapsed}s elapsed): Server is waking up...`
+          );
+
+          if (elapsed >= 120) {
+            clearInterval(intervalId);
+            console.warn(
+              '[AsanaSense Server] ⚠️ Ping sequence reached 120s limit. Check your hosted server dashboard.'
+            );
+            resolve({ online: false, totalSeconds: elapsed, attempts });
+          }
+        }, 3000);
+      });
+    };
+
+    // Direct Console Function Aliases
     (window as any).openAsanaSettings = openSettings;
     (window as any).openSettings = openSettings;
+    (window as any).settings = openSettings;
     (window as any).asanaSettings = openSettings;
+    (window as any).coldRestart = startColdWakeSequence;
+    (window as any).wakeServer = startColdWakeSequence;
+    (window as any).wake = startColdWakeSequence;
+
+    // Comprehensive asana object
     (window as any).asana = {
       settings: openSettings,
       openSettings: openSettings,
-      backend: (url: string) => {
-        setBackendUrl(url);
-        return `Backend URL updated to: ${url}`;
+      closeSettings: closeSettings,
+      coldRestart: startColdWakeSequence,
+      wake: startColdWakeSequence,
+      wakeServer: startColdWakeSequence,
+      backend: (url?: string) => {
+        if (url && typeof url === 'string') {
+          setBackendUrl(url);
+          console.log(`%c[AsanaSense]%c Backend URL set to: %c${url}`, 'color: #059669;', 'color: inherit;', 'color: #0284c7; font-weight: bold;');
+          return `Backend URL updated to: ${url}`;
+        }
+        return getBackendUrl();
       },
       status: async () => {
         const report = await checkBackendConnection();
@@ -89,15 +225,29 @@ export default function App() {
         console.log('Health check result:', isOnline ? 'Online (200 OK)' : 'Offline / Cold Start');
         return isOnline;
       },
+      help: () => {
+        console.group('%c🧘 Asana Sense Developer & System Commands', 'color: #059669; font-weight: bold; font-size: 13px;');
+        console.log('%casana.settings()%c or %csettings()%c       - Open backend & OAuth settings modal', 'color: #0284c7; font-weight: bold;', 'color: inherit;', 'color: #0284c7; font-weight: bold;', 'color: inherit;');
+        console.log('%casana.coldRestart()%c or %cwake()%c        - Actively wake up cold server with live console progress', 'color: #0284c7; font-weight: bold;', 'color: inherit;', 'color: #0284c7; font-weight: bold;', 'color: inherit;');
+        console.log('%casana.status()%c                          - Print backend latency & connection diagnostics table', 'color: #0284c7; font-weight: bold;', 'color: inherit;');
+        console.log('%casana.backend("https://...")%c            - View or update backend API URL', 'color: #0284c7; font-weight: bold;', 'color: inherit;');
+        console.log('%casana.checkHealth()%c                     - Run immediate /api/health probe', 'color: #0284c7; font-weight: bold;', 'color: inherit;');
+        console.groupEnd();
+        return 'Type any command above to run.';
+      },
     };
 
     console.info(
-      '%c[AsanaSense]%c Settings are hidden in the UI. Type %casana.settings()%c or %copenAsanaSettings()%c in the console to open developer settings.',
+      '%c[AsanaSense]%c Settings are hidden in the UI. Type %casana.settings()%c or %csettings()%c to open settings. Type %casana.wake()%c or %cwake()%c to handle cold starts.',
       'color: #059669; font-weight: bold;',
       'color: inherit;',
       'color: #0284c7; font-weight: bold;',
       'color: inherit;',
       'color: #0284c7; font-weight: bold;',
+      'color: inherit;',
+      'color: #d97706; font-weight: bold;',
+      'color: inherit;',
+      'color: #d97706; font-weight: bold;',
       'color: inherit;'
     );
   }, []);
@@ -110,7 +260,7 @@ export default function App() {
     }
 
     console.warn(
-      '%c[AsanaSense Backend]%c Server is offline or waking up from Render cold start. Auto-polling /api/health...',
+      '%c[AsanaSense Backend]%c Server is offline or waking up from cold start. Auto-polling /api/health...',
       'color: #d97706; font-weight: bold;',
       'color: inherit;'
     );
@@ -312,6 +462,10 @@ export default function App() {
   // Exit session handler with dedicated exit loading animation screen
   const handleExitSession = (callback?: () => void) => {
     sessionStorage.setItem('asana_exited_session', 'true');
+    // Increment rotation offset so pose order shifts forward on home page & in future sessions
+    // Applies for both signed-in accounts and guest users!
+    incrementSessionRotationOffset(1);
+    setPoseRotationOffset(getSessionRotationOffset());
     setIsInitialSignInAnimation(false);
     setSessionTransition({
       mode: 'exit',
@@ -341,6 +495,8 @@ export default function App() {
   };
 
   // Central Session Trigger: performs pre-flight FastAPI health check before entering live session
+  const GUEST_ALLOWED_POSES = ['dog', 'warrior', 'tree'];
+
   const handleInitiateSession = async (poseId?: string) => {
     // Intercept Mobile Devices: Play spoken voice advisory and show desktop recommendation modal
     if (isMobileDevice()) {
@@ -350,13 +506,8 @@ export default function App() {
       return;
     }
 
-    if (!userProfile) {
-      setPendingPoseId(poseId);
-      setPendingStartSession(true);
-      setAuthMode('signup');
-      setAuthModalOpen(true);
-      return;
-    }
+    // Allow guest users to proceed into the live session with their selected pose;
+    // locked poses will display a polite guest advisory with right-arrow shelf guidance inside the studio.
 
     // Pre-flight check: Verify FastAPI backend is online
     try {
@@ -375,9 +526,11 @@ export default function App() {
     sessionStorage.setItem('asana_entered_session', 'true');
     setIsInitialSignInAnimation(false);
 
-    setSessionInitialPoseId(poseId);
+    // Default guest initial pose to 'dog' (Downward Dog) if none specified
+    const initialPose = poseId || (!userProfile ? 'dog' : undefined);
+    setSessionInitialPoseId(initialPose);
     setInspectingPose(null);
-    const targetPose = poses.find((p) => p.id === poseId);
+    const targetPose = poses.find((p) => p.id === initialPose);
 
     setSessionTransition({
       mode: 'launch',
@@ -519,11 +672,16 @@ export default function App() {
         // Persist + refresh stats + dispatch email in the background so network latency never blocks report display
         void (async () => {
           try {
-            await saveSessionRecord(session);
+            await saveSessionRecord(session, userProfile?.email);
           } catch (err) {
             console.warn('[App] Failed to save session record:', err);
           }
-          if (userProfile?.email) {
+          // Check strict 5-second hold requirement: only send session summary email if at least one pose was held for >= 5s
+          const posesWithMinHold = (session.posesRecorded || []).filter(
+            (p) => (p.durationSeconds || 0) >= 5 || (p.bestHoldSeconds || 0) >= 5
+          );
+
+          if (userProfile?.email && posesWithMinHold.length > 0) {
             try {
               await apiSendSessionEmail({
                 sessionData: session,
@@ -533,6 +691,8 @@ export default function App() {
             } catch (emailErr) {
               console.warn('[App] Background email dispatch notice:', emailErr);
             }
+          } else if (userProfile?.email && posesWithMinHold.length === 0) {
+            console.log('[App] Session had no poses held for >= 5 seconds. Skipping email dispatch as requested.');
           }
           try {
             const updated = await fetchUserProfileFromAPI();
@@ -638,6 +798,39 @@ export default function App() {
         />
       )}
 
+      {/* Precautionary Health & Dietary Advisory Bar on Dashboard (For Guests & Authorized Users) */}
+      {activeView === 'home' && !homeAdvisoryDismissed && (
+        <aside aria-label="Health and practice safety notice" className="bg-gradient-to-r from-amber-50 via-stone-50 to-amber-50 border-b border-amber-200/80 px-4 py-2 text-xs text-amber-950 transition-all z-20">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="w-5 h-5 rounded-full bg-amber-200 text-amber-800 flex items-center justify-center shrink-0 shadow-2xs">
+                <Info className="w-3.5 h-3.5" />
+              </span>
+              <p className="text-[11px] sm:text-xs text-amber-900 leading-snug">
+                <strong className="font-bold text-amber-950 uppercase text-[10px] tracking-wide mr-1.5 bg-amber-200/70 px-1.5 py-0.5 rounded">
+                  Practice Precaution
+                </strong>
+                Avoid performing yoga postures immediately after eating. Wait at least <span className="font-semibold text-amber-950">2 to 3 hours</span> after a full meal (or <span className="font-semibold text-amber-950">45–60 minutes</span> after a light snack) for comfortable digestion and alignment.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                try {
+                  sessionStorage.setItem('asana_dietary_advisory_dismissed', 'true');
+                } catch {
+                  // ignore
+                }
+                setHomeAdvisoryDismissed(true);
+              }}
+              className="p-1 rounded-lg text-amber-700 hover:text-amber-950 hover:bg-amber-200/60 transition cursor-pointer shrink-0"
+              title="Dismiss Advisory"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </aside>
+      )}
+
       {activeView === 'live-session' ? (
         <ErrorBoundary
           fullScreen
@@ -647,6 +840,7 @@ export default function App() {
           <LivePostureSession
             userProfile={userProfile}
             initialPoseId={sessionInitialPoseId}
+            poseRotationOffset={poseRotationOffset}
             onFinishSession={handleSessionFinished}
             onClose={() => handleExitSession()}
             onOpenAuth={() => handleOpenAuth('signup')}
@@ -662,6 +856,7 @@ export default function App() {
         <main className="flex-1">
           <HeroSection
             userProfile={userProfile}
+            poseRotationOffset={poseRotationOffset}
             isInitialSignInAnimation={showLaunchAnimation}
             onStartPractice={() => handleInitiateSession(undefined)}
             onOpenAuth={handleOpenAuth}
@@ -669,6 +864,7 @@ export default function App() {
           />
           <PoseCarousel
             userProfile={userProfile}
+            poseRotationOffset={poseRotationOffset}
             onSelectPoseForPractice={(pose) => handleInitiateSession(pose.id)}
             onViewPoseDetails={(pose) => {
               if (!userProfile) {
@@ -802,6 +998,7 @@ export default function App() {
               setCompletedSession(null);
               handleOpenAuth('signup');
             }}
+            onUserAuthenticated={(u) => setUserProfile(u)}
             onRestartPractice={() => {
               setCompletedSession(null);
               handleInitiateSession(undefined);
@@ -821,7 +1018,7 @@ export default function App() {
         />
       )}
 
-      {/* FastAPI Backend Server Down Modal */}
+      {/* Server Cold Start & Warming Up Modal */}
       {serverDownModalOpen && (
         <div
           id="server-down-modal-overlay"
@@ -831,34 +1028,42 @@ export default function App() {
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-950/80 backdrop-blur-sm animate-in fade-in"
         >
           <div
-            className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-200 text-stone-900 relative text-center space-y-4"
+            className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-stone-200 text-stone-900 relative text-center space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="w-14 h-14 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-inner">
-              <WifiOff className="w-7 h-7" />
+            <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto shadow-inner">
+              <RefreshCw className="w-7 h-7 animate-spin" style={{ animationDuration: '3.5s' }} />
             </div>
 
             <div className="space-y-1.5">
-              <span className="px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 text-[10px] font-bold border border-rose-200 uppercase tracking-wider inline-block">
-                Connection Required
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 text-[10px] font-bold border border-amber-200 uppercase tracking-wider inline-block">
+                Server Waking Up
               </span>
               <h3 className="text-xl font-serif font-bold text-stone-900">
-                Server Unavailable
+                Warming Up Connection
               </h3>
               <p className="text-xs text-stone-600 leading-relaxed font-medium">
-                We're having trouble connecting to the server. It may be temporarily offline or warming up.
+                The server rests when not in use and takes about 30 to 45 seconds to wake back up. We are actively waking it up right now.
               </p>
             </div>
 
-            {/* Live Auto-Polling Recovery Banner */}
-            <div className="bg-emerald-50/80 border border-emerald-200/90 rounded-2xl p-3 flex items-center justify-center gap-2.5 text-emerald-900 text-xs shadow-xs">
-              <span className="relative flex h-2.5 w-2.5 shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-              <span className="font-medium text-left">
-                Auto-reconnecting every 3.5s... {autoPollAttempts > 0 && <span className="opacity-70 text-[10px]">({autoPollAttempts} checks)</span>}
-              </span>
+            {/* Live Auto-Polling Recovery Banner with Timer */}
+            <div className="bg-amber-50/80 border border-amber-200/90 rounded-2xl p-3.5 space-y-2 text-stone-700 text-xs shadow-xs text-left">
+              <div className="flex items-center justify-between text-amber-900 font-semibold text-xs">
+                <span className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                  </span>
+                  <span>Connecting to server...</span>
+                </span>
+                <span className="text-[11px] font-mono text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full font-bold">
+                  {coldStartSeconds}s elapsed
+                </span>
+              </div>
+              <p className="text-[11px] text-stone-600 leading-relaxed">
+                Checking server response (attempt #{autoPollAttempts}). Please leave this open; your session will launch automatically as soon as it responds.
+              </p>
             </div>
 
             <div className="pt-1">
@@ -869,7 +1074,7 @@ export default function App() {
                 className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition cursor-pointer shadow-md shadow-emerald-900/20 disabled:opacity-60 flex items-center justify-center gap-1.5"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isRetryingConnection ? 'animate-spin' : ''}`} />
-                <span>{isRetryingConnection ? 'Checking Server...' : 'Retry Connection'}</span>
+                <span>{isRetryingConnection ? 'Checking Connection...' : 'Check Server Now'}</span>
               </button>
             </div>
 

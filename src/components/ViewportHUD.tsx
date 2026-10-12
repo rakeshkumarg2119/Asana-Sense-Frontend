@@ -12,7 +12,10 @@ import {
   Play,
   Camera,
   Minus,
-  Plus
+  Plus,
+  Loader2,
+  Lock,
+  ArrowRight
 } from 'lucide-react';
 import type { YogaPose, PostureAnalysisResult, PoseDetectionResult } from '../types';
 
@@ -20,6 +23,9 @@ export interface ViewportHUDProps {
   currentPose: YogaPose | null;
   isPoseActive: boolean;
   cameraActive: boolean;
+  isStartingCamera?: boolean;
+  isCurrentPoseLocked?: boolean;
+  onOpenAuth?: () => void;
   videoFitMode: 'contain' | 'cover';
   modelPoseResult: PoseDetectionResult | null;
   postureAnalysis: PostureAnalysisResult;
@@ -45,6 +51,9 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
   currentPose,
   isPoseActive,
   cameraActive,
+  isStartingCamera = false,
+  isCurrentPoseLocked = false,
+  onOpenAuth,
   videoFitMode,
   modelPoseResult,
   postureAnalysis,
@@ -248,6 +257,10 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
                 <span className="text-[11px] font-bold text-white block mt-0.5">
                   {!isPoseActive 
                     ? 'Waiting to Start' 
+                    : !cameraActive
+                    ? 'Camera Offline'
+                    : !modelPoseResult?.pose_detected
+                    ? 'Step into Frame'
                     : modelPoseResult?.is_correct
                       ? 'All Joints Correct 🟢'
                       : modelPoseResult?.predicted_pose === 'no_pose'
@@ -371,35 +384,83 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
         {/* Ready Gate Floating Center Banner if Pose is Selected but Not Active */}
         {currentPose && !isPoseActive && (
           <div className="self-center pointer-events-auto bg-stone-950/95 backdrop-blur-md border border-emerald-500/60 rounded-3xl p-4 sm:p-5 text-center shadow-2xl max-w-md w-full animate-in fade-in zoom-in duration-300">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center mx-auto mb-2 border border-emerald-500/30">
-              <Sparkle className="w-5 h-5 animate-spin" />
-            </div>
-            <h4 className="text-base font-bold text-white">
-              Ready to practice {currentPose.name}?
-            </h4>
-            <p className="text-xs text-stone-300 mt-1 mb-3">
-              Target hold: <strong>{currentPose.idealHoldDurationSeconds} seconds</strong>. Click below or say <em>"I'm ready"</em> to start live posture tracking.
-            </p>
+            {isCurrentPoseLocked ? (
+              <div className="space-y-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-300 flex items-center justify-center mx-auto border border-amber-500/30">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <h4 className="text-base font-bold text-white">
+                  {currentPose.name} is Locked in Guest Mode
+                </h4>
+                <p className="text-xs text-stone-300 leading-relaxed">
+                  You are currently practicing as a guest. Please try one of our 3 free postures (Downward Dog, Warrior II, Tree Pose), or sign up to unlock the entire sequence.
+                </p>
+                <div className="pt-2 border-t border-stone-800 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-1.5 text-[11px] text-amber-300 font-medium">
+                    <span>Try free poses in shelf</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onOpenAuth}
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
+                  >
+                    <span>Sign In / Sign Up</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center mx-auto mb-2 border border-emerald-500/30">
+                  <Sparkle className="w-5 h-5 animate-spin" />
+                </div>
+                <h4 className="text-base font-bold text-white">
+                  Ready to practice {currentPose.name}?
+                </h4>
+                <p className="text-xs text-stone-300 mt-1 mb-3">
+                  {!cameraActive ? (
+                    <>Step 1: Turn on camera so Veda AI can see you. Step 2: Step into frame and click <em>&ldquo;I&apos;m Ready&rdquo;</em>.</>
+                  ) : (
+                    <>Target hold: <strong>{targetHoldDuration} seconds</strong>. Step into position and click <em>&ldquo;I&apos;m Ready&rdquo;</em> or say <em>&ldquo;Ready&rdquo;</em>.</>
+                  )}
+                </p>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
-              <button
-                onClick={onConfirmReadyAndStart}
-                className="w-full sm:w-auto px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 cursor-pointer"
-              >
-                <Play className="w-4 h-4 fill-white" />
-                <span>I'm Ready • Start {currentPose.name}</span>
-              </button>
-
-              {!cameraActive && (
-                <button
-                  onClick={onStartCamera}
-                  className="w-full sm:w-auto px-4 py-2.5 rounded-2xl bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer border border-stone-700"
-                >
-                  <Camera className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Turn On Camera</span>
-                </button>
-              )}
-            </div>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+                  {/* Distinct Button 1: Turn On Camera */}
+                  {!cameraActive ? (
+                    <button
+                      type="button"
+                      onClick={onStartCamera}
+                      disabled={isStartingCamera}
+                      className="w-full sm:w-auto px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-60 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 cursor-pointer"
+                    >
+                      {isStartingCamera ? (
+                        <>
+                          <Loader2 className="w-4 h-4 text-emerald-200 animate-spin" />
+                          <span>Starting Camera...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="w-4 h-4 text-emerald-200" />
+                          <span>Turn On Camera</span>
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    /* Distinct Button 2: I'm Ready */
+                    <button
+                      type="button"
+                      onClick={onConfirmReadyAndStart}
+                      className="w-full sm:w-auto px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 cursor-pointer animate-pulse"
+                    >
+                      <Play className="w-4 h-4 fill-white" />
+                      <span>I&apos;m Ready • Start {currentPose.name}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

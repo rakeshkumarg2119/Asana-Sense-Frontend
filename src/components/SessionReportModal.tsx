@@ -39,8 +39,8 @@ import {
 } from 'lucide-react';
 import { PracticeSession, UserProfile } from '../types';
 import { ALL_POSES } from '../data/yogaPoses';
-import { getStoredSessions } from '../utils/profileStorage';
-import { apiGenerateSessionReport, apiSendSessionEmail, getToken } from '../utils/apiClient';
+import { getStoredSessions, saveUserProfile } from '../utils/profileStorage';
+import { apiGenerateSessionReport, apiSendSessionEmail, apiSignIn, apiSendOtp, getToken } from '../utils/apiClient';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 
 // ── Defensive sanitizers ─────────────────────────────────────────────────────
@@ -157,6 +157,7 @@ interface SessionReportModalProps {
   userProfile: UserProfile | null;
   onClose: () => void;
   onOpenAuth?: () => void;
+  onUserAuthenticated?: (user: UserProfile) => void;
   onRestartPractice?: () => void;
   onReturnToSession?: () => void;
   onExitToDashboard?: () => void;
@@ -244,6 +245,7 @@ export const SessionReportModal: React.FC<SessionReportModalProps> = ({
 }) => {
   const exitingRef = useRef(false);
   const [showCloseConfirmation, setShowCloseConfirmation] = useState(false);
+  const [showEmailGuestPrompt, setShowEmailGuestPrompt] = useState(false);
 
   // Focus trapping and Escape key management
   const containerRef = useModalFocusTrap({
@@ -269,42 +271,46 @@ export const SessionReportModal: React.FC<SessionReportModalProps> = ({
     return Array.isArray(list) ? list.filter(Boolean) : [];
   }, [session]);
 
-  // Find previous session for comparison (from prop or localStorage)
+  // Find previous session for comparison strictly scoped to this user
   const priorSession = useMemo(() => {
     if (previousSessionProp) return previousSessionProp;
-    const all = getStoredSessions();
+    const userEmail = userProfile?.email;
+    const all = getStoredSessions(userEmail);
+    // Only compare against an earlier session belonging strictly to this user
     return all.find((s) => s.id !== session.id) || null;
-  }, [previousSessionProp, session.id]);
+  }, [previousSessionProp, session.id, userProfile?.email]);
 
   // Calculate live comparison stats between this session and prior session
   const comparisonMetrics = useMemo(() => {
     const currentScore = Math.round(safeNum(session.overallAccuracy ?? (session as any).overall_accuracy, 0));
+    const hasPriorSession = Boolean(priorSession);
     const prevRaw = priorSession ? (priorSession.overallAccuracy ?? (priorSession as any).overall_accuracy) : undefined;
-    const prevScore = prevRaw !== undefined && prevRaw !== null && Number.isFinite(Number(prevRaw)) ? Math.round(Number(prevRaw)) : null;
-    const scoreDiff = prevScore !== null ? currentScore - prevScore : null;
+    const prevScore = (hasPriorSession && prevRaw !== undefined && prevRaw !== null && Number.isFinite(Number(prevRaw))) ? Math.round(Number(prevRaw)) : null;
+    const scoreDiff = (hasPriorSession && prevScore !== null) ? currentScore - prevScore : null;
 
     const currentDuration = safeNum(session.totalDurationSeconds ?? (session as any).total_duration_seconds, 0);
-    const prevDuration = priorSession ? (priorSession.totalDurationSeconds ?? (priorSession as any).total_duration_seconds ?? null) : null;
-    const durationDiff = prevDuration !== null ? currentDuration - prevDuration : null;
+    const prevDuration = (hasPriorSession && priorSession) ? (priorSession.totalDurationSeconds ?? (priorSession as any).total_duration_seconds ?? null) : null;
+    const durationDiff = (hasPriorSession && prevDuration !== null) ? currentDuration - prevDuration : null;
 
-    // Check for identical pose match between sessions
+    // Check for identical pose match between sessions ONLY if priorSession actually exists
     let matchedPoseText = '';
-    const prevPoses = priorSession ? (priorSession.posesRecorded || (priorSession as any).poses_recorded || []) : [];
-    
-    for (const cp of recordedPoses) {
-      const cId = cp.poseId || cp.pose_id;
-      const matched = Array.isArray(prevPoses) ? prevPoses.find((p: any) => (p?.poseId || p?.pose_id) === cId) : null;
-      if (matched) {
-        const cHold = totalHoldOf(cp);
-        const pHold = totalHoldOf(matched);
-        const cAcc = accuracyOf(cp);
-        const pAcc = accuracyOf(matched);
-        const hDiff = cHold - pHold;
-        const aDiff = cAcc - pAcc;
-        const pName = poseNameOf(cp);
+    if (hasPriorSession && priorSession) {
+      const prevPoses = priorSession.posesRecorded || (priorSession as any).poses_recorded || [];
+      for (const cp of recordedPoses) {
+        const cId = cp.poseId || cp.pose_id;
+        const matched = Array.isArray(prevPoses) ? prevPoses.find((p: any) => (p?.poseId || p?.pose_id) === cId) : null;
+        if (matched) {
+          const cHold = totalHoldOf(cp);
+          const pHold = totalHoldOf(matched);
+          const cAcc = accuracyOf(cp);
+          const pAcc = accuracyOf(matched);
+          const hDiff = cHold - pHold;
+          const aDiff = cAcc - pAcc;
+          const pName = poseNameOf(cp);
 
-        matchedPoseText = `In your previous session with ${pName}, you held for ${pHold}s with ${pAcc}% accuracy. Today you achieved ${cHold}s (${hDiff >= 0 ? '+' : ''}${hDiff}s) with ${cAcc}% accuracy (${aDiff >= 0 ? '+' : ''}${aDiff}%)!`;
-        break;
+          matchedPoseText = `In your previous session with ${pName}, you held for ${pHold}s with ${pAcc}% accuracy. Today you achieved ${cHold}s (${hDiff >= 0 ? '+' : ''}${hDiff}s) with ${cAcc}% accuracy (${aDiff >= 0 ? '+' : ''}${aDiff}%)!`;
+          break;
+        }
       }
     }
 
@@ -316,6 +322,7 @@ export const SessionReportModal: React.FC<SessionReportModalProps> = ({
       prevDuration,
       durationDiff,
       matchedPoseText,
+      hasPriorSession,
     };
   }, [session, priorSession, recordedPoses]);
 
@@ -331,10 +338,14 @@ export const SessionReportModal: React.FC<SessionReportModalProps> = ({
       boostingMessage: recordedPoses.length > 0
         ? `Great work on the mat today! You practiced ${recordedPoses.map(poseNameOf).join(', ')}. Every focused hold builds deeper stability and body awareness.`
         : 'Every session on the mat counts. Hold a pose a little longer next time to unlock detailed telemetry.',
-      comparisonWithPrevious: comparisonMetrics.matchedPoseText || (
-        comparisonMetrics.prevScore !== null
-          ? `Overall alignment moved from ${comparisonMetrics.prevScore}% to ${comparisonMetrics.currentScore}% (${comparisonMetrics.scoreDiff! >= 0 ? '+' : ''}${comparisonMetrics.scoreDiff}%).`
-          : `Baseline session recorded at ${comparisonMetrics.currentScore}% accuracy. Future sessions will track your hold growth.`
+      comparisonWithPrevious: comparisonMetrics.hasPriorSession ? (
+        comparisonMetrics.matchedPoseText || (
+          comparisonMetrics.prevScore !== null
+            ? `Overall alignment moved from ${comparisonMetrics.prevScore}% to ${comparisonMetrics.currentScore}% (${comparisonMetrics.scoreDiff! >= 0 ? '+' : ''}${comparisonMetrics.scoreDiff}%).`
+            : `Overall alignment tracked at ${comparisonMetrics.currentScore}%.`
+        )
+      ) : (
+        `Baseline Calibration Session: This is your initial practice session. Your ${comparisonMetrics.currentScore}% alignment score establishes your baseline benchmark for future practice.`
       ),
       keyStrengths: recordedPoses.slice(0, 3).map((p: any) =>
         `${poseNameOf(p)}: best hold ${bestHoldOf(p)}s at ${accuracyOf(p)}% joint alignment.`
@@ -363,7 +374,7 @@ export const SessionReportModal: React.FC<SessionReportModalProps> = ({
     try {
       const res = await apiGenerateSessionReport({
         sessionData: session,
-        previousSessionData: priorSession,
+        previousSessionData: priorSession || undefined,
       });
       if (requestId !== reportRequestRef.current) return;
       if (res?.success && res.data && typeof res.data === 'object') {
@@ -712,12 +723,18 @@ Generated securely by ASANA - SENSE AI Vision Studio
       </html>
     `;
 
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(reportHTML);
-      printWindow.document.close();
-    } else {
-      // Fallback if popup blocker intercepted print window
+    // Direct PDF/HTML Report Download via Blob (iframe and sandbox compliant)
+    try {
+      const blob = new Blob([reportHTML], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ASANA_SENSE_Report_${session.id || Date.now()}.html`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch {
       handleCopySummary();
     }
   };
@@ -743,9 +760,19 @@ Generated securely by ASANA - SENSE AI Vision Studio
 
     const targetEmail = userProfile?.email;
     if (!targetEmail) {
+      setShowEmailGuestPrompt(true);
+      setEmailStatus('idle');
+      onOpenAuth?.();
+      return;
+    }
+
+    const validPoses = (session.posesRecorded || []).filter(
+      (p) => (p.durationSeconds || 0) >= 5 || (p.bestHoldSeconds || 0) >= 5
+    );
+    if (validPoses.length === 0) {
       setEmailStatus('error');
-      setEmailStatusMsg('Please sign in or update your profile email to receive reports.');
-      setTimeout(() => setEmailStatus('idle'), 4000);
+      setEmailStatusMsg('Session had no poses held for at least 5 seconds. No report email sent.');
+      setTimeout(() => setEmailStatus('idle'), 5000);
       return;
     }
 
@@ -1305,22 +1332,46 @@ Generated securely by ASANA - SENSE AI Vision Studio
               </span>
             </div>
           ) : (
-            <div className="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-indigo-950">
-              <div className="flex items-start gap-2">
-                <UserCheck className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+            <div className={`p-4 rounded-2xl transition-all ${
+              showEmailGuestPrompt
+                ? 'bg-amber-50 border-2 border-amber-500 shadow-md ring-4 ring-amber-100'
+                : 'bg-indigo-50 border border-indigo-200/80'
+            } flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs`}>
+              <div className="flex items-start gap-2.5">
+                <div className={`w-8 h-8 rounded-xl ${showEmailGuestPrompt ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'} flex items-center justify-center shrink-0`}>
+                  <Mail className="w-4 h-4" />
+                </div>
                 <div>
-                  <span className="font-bold block">Save this session & unlock badge tracking</span>
-                  <span className="text-indigo-800 text-[11px]">
-                    Create a free account to permanently save this report to your private cloud vault.
+                  <span className={`font-bold block text-sm ${showEmailGuestPrompt ? 'text-amber-950' : 'text-indigo-950'}`}>
+                    {showEmailGuestPrompt ? 'Sign In or Sign Up to Receive Your Report via Email' : 'Save this session & unlock badge tracking'}
+                  </span>
+                  <span className={`text-[11px] block mt-0.5 ${showEmailGuestPrompt ? 'text-amber-800' : 'text-indigo-800'}`}>
+                    {showEmailGuestPrompt
+                      ? 'Creating a free account links your email address so our server can deliver certified posture reports directly to your inbox.'
+                      : 'Create a free account to permanently save this report to your private cloud vault.'}
                   </span>
                 </div>
               </div>
-              <button
-                onClick={onOpenAuth}
-                className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shrink-0 cursor-pointer shadow-xs"
-              >
-                Sign Up / Sign In
-              </button>
+              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                {showEmailGuestPrompt && (
+                  <button
+                    type="button"
+                    onClick={() => setShowEmailGuestPrompt(false)}
+                    className="px-3 py-1.5 rounded-xl text-stone-600 hover:text-stone-900 text-xs font-semibold"
+                  >
+                    Dismiss
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onOpenAuth}
+                  className={`w-full sm:w-auto px-4 py-2 rounded-xl ${
+                    showEmailGuestPrompt ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'
+                  } text-white font-semibold shrink-0 cursor-pointer shadow-xs transition`}
+                >
+                  Sign In / Sign Up
+                </button>
+              </div>
             </div>
           )}
         </div>

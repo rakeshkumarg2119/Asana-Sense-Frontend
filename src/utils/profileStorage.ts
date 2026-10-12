@@ -7,6 +7,17 @@ import { apiGetMe, apiSaveSession, apiFetchSessions, getToken, apiUpdateProfile 
 const STORAGE_KEY_USER = 'asana_sense_user_profile_v2';
 const STORAGE_KEY_SESSIONS = 'asana_sense_sessions_v2';
 
+export function getSessionStorageKey(userEmail?: string | null): string {
+  if (userEmail && userEmail.trim()) {
+    return `${STORAGE_KEY_SESSIONS}_${userEmail.trim().toLowerCase()}`;
+  }
+  const current = getStoredUserProfile();
+  if (current?.email && current.email.trim()) {
+    return `${STORAGE_KEY_SESSIONS}_${current.email.trim().toLowerCase()}`;
+  }
+  return `${STORAGE_KEY_SESSIONS}_guest`;
+}
+
 // ── Persistent Custom Display Name Registry ─────────────────────────────────
 
 const STORAGE_KEY_CUSTOM_NAMES = 'asana_user_custom_names_v1';
@@ -143,9 +154,10 @@ export async function updateProfileOnAPI(updates: Record<string, any>): Promise<
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
 
-export function getStoredSessions(): PracticeSession[] {
+export function getStoredSessions(userEmail?: string | null): PracticeSession[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_SESSIONS);
+    const key = getSessionStorageKey(userEmail);
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -169,9 +181,9 @@ export function getStoredSessions(): PracticeSession[] {
 }
 
 /**
- * Save session to API and localStorage.
+ * Save session to API and localStorage (partitioned by user).
  */
-export async function saveSessionRecord(session: PracticeSession): Promise<void> {
+export async function saveSessionRecord(session: PracticeSession, userEmail?: string | null): Promise<void> {
   // Normalize session to contain both camelCase and snake_case properties
   const startTime = session.startTime || (session as any).start_time || Date.now();
   const endTime = session.endTime || (session as any).end_time || Date.now();
@@ -223,9 +235,10 @@ export async function saveSessionRecord(session: PracticeSession): Promise<void>
 
   // Save to localStorage immediately with de-duplication
   try {
-    const current = getStoredSessions().filter((s) => (s.id || (s as any)._id) !== sessionId);
+    const key = getSessionStorageKey(userEmail);
+    const current = getStoredSessions(userEmail).filter((s) => (s.id || (s as any)._id) !== sessionId);
     current.unshift(normalizedSession);
-    localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(current.slice(0, 30)));
+    localStorage.setItem(key, JSON.stringify(current.slice(0, 30)));
   } catch (e) {
     console.error('Failed to save session locally:', e);
   }
@@ -302,27 +315,29 @@ export async function saveSessionRecord(session: PracticeSession): Promise<void>
 /**
  * Fetch sessions from API with localStorage fallback.
  */
-export async function fetchSessionsFromAPI(): Promise<PracticeSession[]> {
+export async function fetchSessionsFromAPI(userEmail?: string | null): Promise<PracticeSession[]> {
   try {
     const sessions = await apiFetchSessions();
     if (sessions.length > 0) {
-      localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(sessions.slice(0, 30)));
+      const key = getSessionStorageKey(userEmail);
+      localStorage.setItem(key, JSON.stringify(sessions.slice(0, 30)));
       return sessions;
     }
   } catch (e) {
     console.warn('API sessions fetch failed, using cached:', e);
   }
-  return getStoredSessions();
+  return getStoredSessions(userEmail);
 }
 
 /**
  * Delete a session from localStorage and update user stats.
  */
-export function deleteStoredSession(sessionId: string): PracticeSession[] {
+export function deleteStoredSession(sessionId: string, userEmail?: string | null): PracticeSession[] {
   try {
-    const current = getStoredSessions();
+    const key = getSessionStorageKey(userEmail);
+    const current = getStoredSessions(userEmail);
     const updated = current.filter((s) => (s.id || (s as any)._id) !== sessionId);
-    localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(updated));
+    localStorage.setItem(key, JSON.stringify(updated));
 
     // Recalculate and update user stats
     const user = getStoredUserProfile();
@@ -355,13 +370,17 @@ export function deleteStoredSession(sessionId: string): PracticeSession[] {
     return updated;
   } catch (e) {
     console.error('Failed to delete session:', e);
-    return getStoredSessions();
+    return getStoredSessions(userEmail);
   }
 }
 
 // ── Logout & Account Deletion ─────────────────────────────────────────────
 
 export function clearUserSessionData(): void {
+  const user = getStoredUserProfile();
+  if (user?.email) {
+    localStorage.removeItem(getSessionStorageKey(user.email));
+  }
   localStorage.removeItem(STORAGE_KEY_USER);
   localStorage.removeItem(STORAGE_KEY_SESSIONS);
   localStorage.removeItem('asana_user_answers');

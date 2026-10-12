@@ -12,7 +12,6 @@ import {
   Layers,
   Activity,
   ChevronRight,
-  Flame,
   Lock
 } from 'lucide-react';
 import { UserProfile } from '../types';
@@ -144,8 +143,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </nav>
 
-          {/* Desktop Header Right Actions: PWA Install + Backend Settings + Auth (Hidden on mobile) */}
-          <div className="hidden md:flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Desktop Header Right Actions: PWA Install + Streak Fire + Auth (Hidden on mobile) */}
+          <div className="hidden md:flex items-center gap-2 sm:gap-2.5 shrink-0">
             {/* Desktop In-App PWA Install Trigger */}
             <PWAInstallButton />
 
@@ -191,6 +190,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Mobile Right Controls: Profile Avatar (if logged in) + Hamburger Menu Toggle */}
           <div className="flex md:hidden items-center gap-2">
+
             {userProfile && (
               <button
                 type="button"
