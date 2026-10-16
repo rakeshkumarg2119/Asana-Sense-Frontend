@@ -766,21 +766,30 @@ Generated securely by ASANA - SENSE AI Vision Studio
       return;
     }
 
-    const validPoses = (session.posesRecorded || []).filter(
-      (p) => (p.durationSeconds || 0) >= 5 || (p.bestHoldSeconds || 0) >= 5
-    );
-    if (validPoses.length === 0) {
-      setEmailStatus('error');
-      setEmailStatusMsg('Session had no poses held for at least 5 seconds. No report email sent.');
-      setTimeout(() => setEmailStatus('idle'), 5000);
-      return;
+    // The 5-second hold requirement applies to the live session alone, not to profile records.
+    // For profile records (isHistoryView), saved sessions in history are always emailable.
+    if (!isHistoryView) {
+      const validPoses = recordedPoses.filter(
+        (p: any) => totalHoldOf(p) >= 5 || bestHoldOf(p) >= 5
+      );
+      if (validPoses.length === 0) {
+        setEmailStatus('error');
+        setEmailStatusMsg('Live session had no poses held for at least 5 seconds. No report email sent.');
+        setTimeout(() => setEmailStatus('idle'), 5000);
+        return;
+      }
     }
 
     setEmailStatus('sending');
     setEmailStatusMsg('');
     try {
+      const normalizedSessionData = {
+        ...session,
+        posesRecorded: recordedPoses,
+        poses_recorded: recordedPoses,
+      };
       const res = await apiSendSessionEmail({
-        sessionData: session,
+        sessionData: normalizedSessionData,
         aiReport: aiReport,
         to_email: targetEmail,
       });

@@ -154,6 +154,59 @@ export async function updateProfileOnAPI(updates: Record<string, any>): Promise<
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
 
+export function normalizeSessionRecord(s: any): PracticeSession {
+  if (!s) return s;
+  const rawPoses = s.posesRecorded || s.poses_recorded || [];
+  const normalizedPoses = Array.isArray(rawPoses)
+    ? rawPoses.map((p: any) => {
+        const dur = Number(p.durationSeconds ?? p.duration_seconds ?? 0);
+        const best = Number(p.bestHoldSeconds ?? p.best_hold_seconds ?? dur);
+        return {
+          ...p,
+          poseId: p.poseId || p.pose_id || 'pose',
+          pose_id: p.poseId || p.pose_id || 'pose',
+          poseName: p.poseName || p.pose_name || 'Yoga Pose',
+          pose_name: p.poseName || p.pose_name || 'Yoga Pose',
+          sanskritName: p.sanskritName || p.sanskrit_name || '',
+          sanskrit_name: p.sanskritName || p.sanskrit_name || '',
+          durationSeconds: dur,
+          duration_seconds: dur,
+          bestHoldSeconds: best,
+          best_hold_seconds: best,
+          attemptsCount: Number(p.attemptsCount ?? p.attempts_count ?? 1),
+          attempts_count: Number(p.attemptsCount ?? p.attempts_count ?? 1),
+          accuracyScore: Number(p.accuracyScore ?? p.accuracy_score ?? 92),
+          accuracy_score: Number(p.accuracyScore ?? p.accuracy_score ?? 92),
+          cuesReceived: p.cuesReceived || p.cues_received || [],
+          cues_received: p.cuesReceived || p.cues_received || [],
+          status: p.status || 'completed',
+        };
+      })
+    : [];
+
+  const dur = Number(s.totalDurationSeconds ?? s.total_duration_seconds ?? 0) ||
+    normalizedPoses.reduce((acc, p) => acc + (p.durationSeconds || 0), 0);
+
+  return {
+    ...s,
+    id: s.id || s._id || ('session_' + (s.startTime || s.start_time || Date.now())),
+    startTime: s.startTime || s.start_time || Date.now(),
+    start_time: s.startTime || s.start_time || Date.now(),
+    endTime: s.endTime || s.end_time || Date.now(),
+    end_time: s.endTime || s.end_time || Date.now(),
+    totalDurationSeconds: dur,
+    total_duration_seconds: dur,
+    overallAccuracy: Number(s.overallAccuracy ?? s.overall_accuracy ?? 90),
+    overall_accuracy: Number(s.overallAccuracy ?? s.overall_accuracy ?? 90),
+    caloriesBurnedEst: Number(s.caloriesBurnedEst ?? s.calories_burned_est ?? Math.max(14, Math.round((dur / 60) * 4.8))),
+    calories_burned_est: Number(s.caloriesBurnedEst ?? s.calories_burned_est ?? Math.max(14, Math.round((dur / 60) * 4.8))),
+    posesRecorded: normalizedPoses,
+    poses_recorded: normalizedPoses,
+    aiReport: s.aiReport || s.ai_report || null,
+    ai_report: s.aiReport || s.ai_report || null,
+  };
+}
+
 export function getStoredSessions(userEmail?: string | null): PracticeSession[] {
   try {
     const key = getSessionStorageKey(userEmail);
@@ -162,7 +215,7 @@ export function getStoredSessions(userEmail?: string | null): PracticeSession[] 
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     
-    // Deduplicate sessions by unique id
+    // Deduplicate sessions by unique id and normalize fields
     const seen = new Set<string>();
     const unique: PracticeSession[] = [];
     for (const item of parsed) {
@@ -172,7 +225,7 @@ export function getStoredSessions(userEmail?: string | null): PracticeSession[] 
         if (seen.has(id)) continue;
         seen.add(id);
       }
-      unique.push(item);
+      unique.push(normalizeSessionRecord(item));
     }
     return unique;
   } catch {
@@ -318,10 +371,11 @@ export async function saveSessionRecord(session: PracticeSession, userEmail?: st
 export async function fetchSessionsFromAPI(userEmail?: string | null): Promise<PracticeSession[]> {
   try {
     const sessions = await apiFetchSessions();
-    if (sessions.length > 0) {
+    if (Array.isArray(sessions) && sessions.length > 0) {
+      const normalized = sessions.map((s) => normalizeSessionRecord(s));
       const key = getSessionStorageKey(userEmail);
-      localStorage.setItem(key, JSON.stringify(sessions.slice(0, 30)));
-      return sessions;
+      localStorage.setItem(key, JSON.stringify(normalized.slice(0, 30)));
+      return normalized;
     }
   } catch (e) {
     console.warn('API sessions fetch failed, using cached:', e);

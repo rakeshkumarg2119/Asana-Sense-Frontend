@@ -549,7 +549,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-stone-500 font-mono text-[10px]">
-                          {Math.round(sessDuration / 60)}m
+                          {sessDuration < 60 ? `${sessDuration}s` : `${Math.round(sessDuration / 60)}m`}
                         </span>
                         <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">
                           {sessAccuracy}%

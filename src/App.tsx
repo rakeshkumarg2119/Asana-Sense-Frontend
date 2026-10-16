@@ -656,9 +656,12 @@ export default function App() {
           } catch (err) {
             console.warn('[App] Failed to save session record:', err);
           }
-          // Check strict 5-second hold requirement: only send session summary email if at least one pose was held for >= 5s
-          const posesWithMinHold = (session.posesRecorded || []).filter(
-            (p) => (p.durationSeconds || 0) >= 5 || (p.bestHoldSeconds || 0) >= 5
+          // Check strict 5-second hold requirement for live session: only send session summary email if at least one pose was held for >= 5s
+          const rawPoses = session.posesRecorded || (session as any).poses_recorded || [];
+          const posesWithMinHold = rawPoses.filter(
+            (p: any) =>
+              Number(p.durationSeconds ?? p.duration_seconds ?? 0) >= 5 ||
+              Number(p.bestHoldSeconds ?? p.best_hold_seconds ?? 0) >= 5
           );
 
           if (userProfile?.email && posesWithMinHold.length > 0) {
@@ -672,7 +675,7 @@ export default function App() {
               console.warn('[App] Background email dispatch notice:', emailErr);
             }
           } else if (userProfile?.email && posesWithMinHold.length === 0) {
-            console.log('[App] Session had no poses held for >= 5 seconds. Skipping email dispatch as requested.');
+            console.log('[App] Live session had no poses held for >= 5 seconds. Skipping background email dispatch.');
           }
           try {
             const updated = await fetchUserProfileFromAPI();
