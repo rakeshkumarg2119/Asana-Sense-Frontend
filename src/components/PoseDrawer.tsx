@@ -87,69 +87,80 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
   }, [isGuest, poseRotationOffset]);
 
   return (
-    <motion.div
-      key="yoga-pose-drawer"
-      initial={{ opacity: 0, x: 30 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 30 }}
-      transition={{ duration: 0.25, ease: 'easeOut' }}
-      style={{ width: typeof window !== 'undefined' && window.innerWidth >= 1024 ? `${100 - splitPercent}%` : '100%' }}
-      className="flex flex-col space-y-2.5 min-w-0 transition-[width] duration-75 lg:pl-2.5 h-full min-h-0 relative z-30 pointer-events-auto"
-    >
-      {/* Drawer Main Container */}
-      <div className="bg-stone-900/95 rounded-3xl p-3 sm:p-4 border border-stone-800 shadow-2xl flex flex-col h-full min-h-0 overflow-hidden">
-        
-        {/* Drawer Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-stone-800 shrink-0 gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center border border-emerald-500/30 shrink-0">
-              <Sliders className="w-3.5 h-3.5" />
-            </div>
-            <div className="truncate">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <h2 className="text-xs font-bold text-white uppercase tracking-wider truncate">
-                  Yoga Posture Spectrum
-                </h2>
-                {isGuest && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold">
-                    Guest Mode • 3 Poses Unlocked
-                  </span>
-                )}
+    <>
+      {/* Mobile Backdrop Overlay (Tap to close bottom sheet) */}
+      <div
+        className="fixed inset-0 bg-black/70 backdrop-blur-xs z-40 lg:hidden pointer-events-auto"
+        onClick={onCloseDrawer}
+        aria-hidden="true"
+      />
+
+      <motion.div
+        key="yoga-pose-drawer"
+        initial={{ opacity: 0, y: typeof window !== 'undefined' && window.innerWidth < 1024 ? 80 : 0, x: typeof window !== 'undefined' && window.innerWidth >= 1024 ? 30 : 0 }}
+        animate={{ opacity: 1, y: 0, x: 0 }}
+        exit={{ opacity: 0, y: typeof window !== 'undefined' && window.innerWidth < 1024 ? 80 : 0, x: typeof window !== 'undefined' && window.innerWidth >= 1024 ? 30 : 0 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+        style={{ width: typeof window !== 'undefined' && window.innerWidth >= 1024 ? `${100 - splitPercent}%` : '100%' }}
+        className="fixed inset-x-0 bottom-0 z-50 max-h-[82vh] lg:relative lg:inset-auto lg:z-30 lg:max-h-none flex flex-col space-y-2.5 min-w-0 transition-[width] duration-75 lg:pl-2.5 h-auto lg:h-full min-h-0 pointer-events-auto"
+      >
+        {/* Drawer Main Container */}
+        <div className="bg-stone-900/98 rounded-t-3xl lg:rounded-3xl p-3 sm:p-4 border-t lg:border border-stone-800 shadow-2xl flex flex-col h-full max-h-[82vh] lg:max-h-none min-h-0 overflow-hidden">
+          
+          {/* Mobile Sheet Drag Handle Affordance */}
+          <div className="w-12 h-1.5 rounded-full bg-stone-700 mx-auto mb-2.5 shrink-0 lg:hidden" />
+
+          {/* Drawer Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-stone-800 shrink-0 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center border border-emerald-500/30 shrink-0">
+                <Sliders className="w-3.5 h-3.5" />
               </div>
-              <p className="text-[10px] text-stone-400 truncate">
-                {drawerShelfMode === 'grid' 
-                  ? isGuest
-                    ? 'Downward Dog, Warrior III & Tree Pose available'
-                    : 'Select any posture to begin biomechanical tracking'
-                  : `${currentPose?.name || 'Select Asana'} • Form & Corrections`}
-              </p>
+              <div className="truncate">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h2 className="text-xs font-bold text-white uppercase tracking-wider truncate">
+                    Yoga Posture Spectrum
+                  </h2>
+                  {isGuest && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold">
+                      Guest Mode • 3 Poses Unlocked
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-stone-400 truncate">
+                  {drawerShelfMode === 'grid' 
+                    ? isGuest
+                      ? 'Downward Dog, Warrior III & Tree Pose available'
+                      : 'Select any posture to begin biomechanical tracking'
+                    : `${currentPose?.name || 'Select Asana'} • Form & Corrections`}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Switch between Full 2x4 Grid and Shrunken/Card Mode */}
+              <button
+                onClick={() => onSetDrawerShelfMode(drawerShelfMode === 'grid' ? 'card' : 'grid')}
+                className={`px-2.5 py-1.5 rounded-xl text-[10px] font-bold transition flex items-center gap-1 cursor-pointer border min-h-[38px] ${
+                  drawerShelfMode === 'grid'
+                    ? 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700'
+                    : 'bg-emerald-600/90 text-white border-emerald-500 hover:bg-emerald-500 shadow-xs'
+                }`}
+                title={drawerShelfMode === 'grid' ? 'Collapse table into Focused Pose Details' : 'Expand back to 2×4 Grid'}
+              >
+                <Grid className="w-3 h-3" />
+                <span>{drawerShelfMode === 'grid' ? 'Details' : 'Grid'}</span>
+              </button>
+
+              <button
+                onClick={onCloseDrawer}
+                className="p-2 sm:p-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-white transition cursor-pointer min-h-[40px] min-w-[40px] flex items-center justify-center"
+                title="Hide Yoga Pose Drawer"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Switch between Full 2x4 Grid and Shrunken/Card Mode */}
-            <button
-              onClick={() => onSetDrawerShelfMode(drawerShelfMode === 'grid' ? 'card' : 'grid')}
-              className={`px-2.5 py-1.5 rounded-xl text-[10px] font-bold transition flex items-center gap-1 cursor-pointer border ${
-                drawerShelfMode === 'grid'
-                  ? 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700'
-                  : 'bg-emerald-600/90 text-white border-emerald-500 hover:bg-emerald-500 shadow-xs'
-              }`}
-              title={drawerShelfMode === 'grid' ? 'Collapse table into Focused Pose Details' : 'Expand back to 2×4 Grid'}
-            >
-              <Grid className="w-3 h-3" />
-              <span>{drawerShelfMode === 'grid' ? 'Details' : 'Grid'}</span>
-            </button>
-
-            <button
-              onClick={onCloseDrawer}
-              className="p-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-white transition cursor-pointer"
-              title="Hide Yoga Pose Drawer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
 
         {/* Scrollable Drawer Content */}
         <div ref={poseGridScrollRef} className="flex-1 overflow-y-auto pr-1 py-3 space-y-4 scrollbar-thin scrollbar-thumb-stone-700">
@@ -406,5 +417,6 @@ export const PoseDrawer: React.FC<PoseDrawerProps> = ({
         </div>
       </div>
     </motion.div>
-  );
+  </>
+);
 };

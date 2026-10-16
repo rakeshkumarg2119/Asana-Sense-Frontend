@@ -17,7 +17,7 @@ export const MobileDesktopNoticeModal: React.FC<MobileDesktopNoticeModalProps> =
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
   const voiceMessage =
-    "We are currently working on mobile adjustments. Thank you for your patience! For the best posture biomechanics and camera tracking experience, please open Asana Sense on your PC or desktop.";
+    "For the best full-body posture tracking, prop your phone 6 to 8 feet away or practice on a laptop.";
 
   const playVoiceGuidance = () => {
     try {
@@ -103,12 +103,12 @@ export const MobileDesktopNoticeModal: React.FC<MobileDesktopNoticeModalProps> =
           </div>
 
           {/* Heading */}
-          <h3 id="mobile-notice-title" className="text-xl font-bold text-stone-900 tracking-tight mb-2">
-            Desktop Experience Recommended
+          <h3 id="mobile-notice-title" className="text-base sm:text-lg font-bold text-stone-900 tracking-tight mb-2">
+            Desktop or Propped Phone Recommended
           </h3>
 
           {/* Voice Cue Status Badge */}
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold mb-4">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold mb-3">
             <Volume2 className={`w-3.5 h-3.5 ${isPlayingAudio ? 'animate-bounce text-emerald-600' : 'text-emerald-500'}`} />
             <span>{isPlayingAudio ? 'Speaking Voice Guidance...' : 'Voice Advice Enabled'}</span>
             <button
@@ -120,13 +120,10 @@ export const MobileDesktopNoticeModal: React.FC<MobileDesktopNoticeModalProps> =
             </button>
           </div>
 
-          {/* Polite Message Body */}
-          <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200/80 text-left space-y-2 mb-5">
-            <p className="text-xs sm:text-sm text-stone-700 leading-relaxed">
-              We are currently working on mobile adjustments for optimal full-body AI vision. <span className="font-semibold text-stone-900">Thank you for your patience!</span>
-            </p>
-            <p className="text-xs sm:text-sm text-stone-600 leading-relaxed">
-              For the most accurate real-time joint biomechanics, voice cues, and camera tracking, please open <span className="font-semibold text-emerald-800">Asana Sense</span> on your <span className="font-semibold text-stone-900">PC or Laptop</span>.
+          {/* Shortened Message Body */}
+          <div className="bg-stone-50 rounded-2xl p-3 sm:p-4 border border-stone-200/80 text-left space-y-1.5 mb-4">
+            <p className="text-xs text-stone-700 leading-relaxed">
+              Full-body pose tracking needs your whole mat visible. For the best angle, prop your phone 6–8 ft away or open on your PC or Laptop.
             </p>
             {targetPoseName && (
               <div className="pt-2 border-t border-stone-200/60 flex items-center gap-1.5 text-xs text-stone-500">

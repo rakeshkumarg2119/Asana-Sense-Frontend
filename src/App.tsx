@@ -498,16 +498,8 @@ export default function App() {
   const GUEST_ALLOWED_POSES = ['dog', 'warrior', 'tree'];
 
   const handleInitiateSession = async (poseId?: string) => {
-    // Intercept Mobile Devices: Play spoken voice advisory and show desktop recommendation modal
-    if (isMobileDevice()) {
-      const targetPose = poseId ? poses.find((p) => p.id === poseId) : undefined;
-      setMobileNoticePoseName(targetPose?.name);
-      setMobileNoticeModalOpen(true);
-      return;
-    }
-
-    // Allow guest users to proceed into the live session with their selected pose;
-    // locked poses will display a polite guest advisory with right-arrow shelf guidance inside the studio.
+    // Allow both mobile and desktop users (guests & authenticated) to proceed into the live session with full vision feedback.
+    // Locked poses will display a polite guest advisory with right-arrow shelf guidance inside the studio.
 
     // Pre-flight check: Verify FastAPI backend is online
     try {
@@ -597,19 +589,13 @@ export default function App() {
       const poseToUse = pendingPoseId;
       setPendingPoseId(undefined);
 
-      if (isMobileDevice()) {
-        const targetPose = poseToUse ? poses.find((p) => p.id === poseToUse) : undefined;
-        setMobileNoticePoseName(targetPose?.name);
-        setMobileNoticeModalOpen(true);
-      } else {
-        setSessionInitialPoseId(poseToUse);
-        setInspectingPose(null);
-        sessionStorage.setItem('asana_entered_session', 'true');
-        setIsInitialSignInAnimation(false);
-        triggerViewTransition('live-session', 'Preparing Live Studio...', () => {
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
-      }
+      setSessionInitialPoseId(poseToUse);
+      setInspectingPose(null);
+      sessionStorage.setItem('asana_entered_session', 'true');
+      setIsInitialSignInAnimation(false);
+      triggerViewTransition('live-session', 'Preparing Live Studio...', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
     } else if (isNewSignUp && !profile.has_completed_onboarding && !profile.hasCompletedOnboarding) {
       setOnboardingModalOpen(true);
     }
@@ -627,19 +613,13 @@ export default function App() {
     setPendingPoseId(undefined);
 
     if (shouldStart) {
-      if (isMobileDevice()) {
-        const targetPose = poseToUse ? poses.find((p) => p.id === poseToUse) : undefined;
-        setMobileNoticePoseName(targetPose?.name);
-        setMobileNoticeModalOpen(true);
-      } else {
-        setSessionInitialPoseId(poseToUse);
-        setInspectingPose(null);
-        sessionStorage.setItem('asana_entered_session', 'true');
-        setIsInitialSignInAnimation(false);
-        triggerViewTransition('live-session', 'Setting up personalized session...', () => {
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
-      }
+      setSessionInitialPoseId(poseToUse);
+      setInspectingPose(null);
+      sessionStorage.setItem('asana_entered_session', 'true');
+      setIsInitialSignInAnimation(false);
+      triggerViewTransition('live-session', 'Setting up personalized session...', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
     }
   };
 

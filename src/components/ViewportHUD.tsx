@@ -15,7 +15,8 @@ import {
   Plus,
   Loader2,
   Lock,
-  ArrowRight
+  ArrowRight,
+  SwitchCamera
 } from 'lucide-react';
 import type { YogaPose, PostureAnalysisResult, PoseDetectionResult } from '../types';
 
@@ -27,6 +28,8 @@ export interface ViewportHUDProps {
   isCurrentPoseLocked?: boolean;
   onOpenAuth?: () => void;
   videoFitMode: 'contain' | 'cover';
+  cameraFacingMode?: 'user' | 'environment';
+  onToggleCameraFacing?: () => void;
   modelPoseResult: PoseDetectionResult | null;
   postureAnalysis: PostureAnalysisResult;
   poseHoldSeconds: number;
@@ -55,6 +58,8 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
   isCurrentPoseLocked = false,
   onOpenAuth,
   videoFitMode,
+  cameraFacingMode = 'user',
+  onToggleCameraFacing,
   modelPoseResult,
   postureAnalysis,
   poseHoldSeconds,
@@ -162,10 +167,10 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
       <div className="absolute inset-0 pointer-events-none p-3 sm:p-4 flex flex-col justify-between z-20">
         
         {/* Top HUD Ribbon */}
-        <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div className="flex items-start justify-between gap-1.5 sm:gap-2 flex-wrap">
           {/* Accuracy Score Pill */}
-          <div className="px-3 py-1.5 rounded-2xl bg-stone-950/85 backdrop-blur-md border border-emerald-500/50 text-xs font-mono text-emerald-300 flex items-center gap-2 shadow-lg">
-            <span className={`w-2 h-2 rounded-full ${
+          <div className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-2xl bg-stone-950/85 backdrop-blur-md border border-emerald-500/50 text-[11px] sm:text-xs font-mono text-emerald-300 flex items-center gap-1.5 sm:gap-2 shadow-lg">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${
               !isPoseActive
                 ? 'bg-amber-400'
                 : modelPoseResult?.is_correct
@@ -174,28 +179,42 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
                 ? 'bg-rose-500'
                 : 'bg-yellow-400'
             }`} />
-            <span>Alignment:</span>
-            <strong className="text-white text-sm font-black">
+            <span className="hidden xs:inline">Alignment:</span>
+            <strong className="text-white text-xs sm:text-sm font-black">
               {!isPoseActive
                 ? 'Standby'
                 : modelPoseResult?.is_correct
-                ? '✓ Perfect (100%)'
+                ? '✓ 100%'
                 : modelPoseResult?.predicted_pose === 'no_pose'
-                ? 'No Yoga Pose'
+                ? 'No Pose'
                 : hasRedJoint
-                ? `${postureAnalysis.score}% (Mistake 🔴)`
-                : `${postureAnalysis.score}% (Holding - Adjust 🟡)`}
+                ? `${postureAnalysis.score}% 🔴`
+                : `${postureAnalysis.score}% 🟡`}
             </strong>
           </div>
+
+          {/* One-Tap Camera Flip Button */}
+          {onToggleCameraFacing && (
+            <button
+              type="button"
+              onClick={onToggleCameraFacing}
+              className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-2xl bg-stone-950/85 backdrop-blur-md border border-emerald-500/50 text-[11px] sm:text-xs font-mono text-emerald-300 flex items-center gap-1.5 shadow-lg pointer-events-auto cursor-pointer hover:bg-stone-900/90 active:scale-95 transition min-h-[36px]"
+              title={cameraFacingMode === 'user' ? 'Switch to Rear / Environment Camera' : 'Switch to Front / Selfie Camera'}
+            >
+              <SwitchCamera className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{cameraFacingMode === 'user' ? 'Flip Cam (Rear)' : 'Flip Cam (Front)'}</span>
+            </button>
+          )}
 
           {/* Framing Fit Mode Badge Toggle Tag */}
           <button
             onClick={() => onSetVideoFitMode(videoFitMode === 'contain' ? 'cover' : 'contain')}
-            className="px-3 py-1.5 rounded-2xl bg-stone-950/85 backdrop-blur-md border border-emerald-500/50 text-xs font-mono text-emerald-300 flex items-center gap-1.5 shadow-lg pointer-events-auto cursor-pointer hover:bg-stone-900/90 transition"
+            className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-2xl bg-stone-950/85 backdrop-blur-md border border-emerald-500/50 text-[11px] sm:text-xs font-mono text-emerald-300 flex items-center gap-1.5 shadow-lg pointer-events-auto cursor-pointer hover:bg-stone-900/90 active:scale-95 transition min-h-[36px]"
             title="Click to toggle Full Body Fit vs Wide Fill"
           >
             <Scan className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Framing: {videoFitMode === 'contain' ? 'Full Body Fit 🎯' : 'Fill View 🔍'}</span>
+            <span className="hidden sm:inline">Framing: {videoFitMode === 'contain' ? 'Full Body Fit 🎯' : 'Fill View 🔍'}</span>
+            <span className="sm:hidden">{videoFitMode === 'contain' ? 'Fit 🎯' : 'Fill 🔍'}</span>
           </button>
 
           {/* POSE HOLD TIMER RING */}
@@ -464,8 +483,8 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
           </div>
         )}
 
-        {/* Bottom Row: Plain green text Veda AI above message box aligned to the right */}
-        <div className="space-y-1.5 pointer-events-auto">
+        {/* Bottom Row: Plain green text Veda AI above message box aligned to the right (Desktop HUD; mobile uses stacked card below camera) */}
+        <div className="hidden lg:block space-y-1.5 pointer-events-auto">
           {/* Plain green text Veda AI aligned to the right side */}
           <div className="flex justify-end pr-1">
             <span className="text-emerald-400 text-xs font-bold uppercase tracking-wider select-none">
@@ -488,7 +507,7 @@ export const ViewportHUD: React.FC<ViewportHUDProps> = ({
                 </span>
               </div>
               <p className="text-xs text-stone-100 font-medium line-clamp-2 leading-snug">
-                👉 {postureAnalysis.keyCues[0] || 'Select an asana and click Ready when in position.'}
+                👉 {postureAnalysis.keyCues[0] || (isPoseActive ? (postureAnalysis.encouragingFeedback || 'Maintain form and breathe steadily.') : 'Select an asana to begin practice.')}
               </p>
             </div>
 

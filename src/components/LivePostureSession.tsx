@@ -45,6 +45,7 @@ import {
   Image as ImageIcon,
   Monitor,
   Laptop,
+  Smartphone,
   ArrowLeft,
   Volume2,
   VolumeX,
@@ -52,7 +53,8 @@ import {
   Key,
   Settings,
   Minus,
-  Plus
+  Plus,
+  SwitchCamera
 } from 'lucide-react';
 import { ALL_POSES } from '../data/yogaPoses';
 import type { YogaPose, PostureAnalysisResult, SessionPoseRecord, PracticeSession, UserProfile, PoseDetectionResult } from '../types';
@@ -259,23 +261,20 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     soundEngine.setMuted(!voiceSpeechEnabled);
   }, [voiceSpeechEnabled]);
 
-  // Play initial greeting or mobile screen warning upon entering session (Single authoritative speech call)
+  // Play initial greeting upon entering session
   useEffect(() => {
     const greetingTimer = setTimeout(() => {
       if (voiceSpeechEnabled) {
-        if (isMobileScreen && !dismissMobileWarning) {
-          soundEngine.speak('Please use a desktop or laptop for a better experience of ASANA - SENSE live session. We are expecting you to come back soon!');
-        } else {
-          soundEngine.speak(fullGreeting);
-        }
+        soundEngine.speak(fullGreeting);
       }
     }, 700);
     return () => clearTimeout(greetingTimer);
-  }, [isMobileScreen, dismissMobileWarning, voiceSpeechEnabled, fullGreeting]);
+  }, [voiceSpeechEnabled, fullGreeting]);
 
   // Camera & Stream state
   const [cameraActive, setCameraActive] = useState(false);
   const [isStartingCamera, setIsStartingCamera] = useState(false);
+  const [cameraFacingMode, setCameraFacingMode] = useState<'user' | 'environment'>('user');
   const cameraActiveRef = useRef(cameraActive);
   cameraActiveRef.current = cameraActive;
   const [cameraPermissionError, setCameraPermissionError] = useState<string | null>(null);
@@ -386,7 +385,9 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
           // Keep ticking (yellow never stops timer)
           break;
         case 'stop': {
-          setIsPoseActive(false);
+          // Do NOT call setIsPoseActive(false) here! 
+          // Setting isPoseActive=false kicks practitioner out of their active practice back to the Ready gate.
+          // Instead, pause/reset the current hold streak so practitioner can realign without interrupting session.
           const currentHold = poseHoldSecondsRef.current;
           if (currentHold > 0 && selectedPoseIndex !== null) {
             const pose = ALL_POSES[selectedPoseIndex];
@@ -583,8 +584,9 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
     onFinishSession: () => handleCompleteSession(),
   });
 
-  // Robust Camera initialization with multi-tier fallback
-  const startCamera = async (): Promise<boolean> => {
+  // Robust Camera initialization with multi-tier fallback (Supports front selfie & rear environment cameras)
+  const startCamera = async (overrideFacing?: 'user' | 'environment'): Promise<boolean> => {
+    const targetFacing = overrideFacing || cameraFacingMode;
     try {
       setIsStartingCamera(true);
       setCameraPermissionError(null);
@@ -592,27 +594,56 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
         throw new Error('Web camera API is not supported in this browser environment.');
       }
 
+      // Stop existing stream tracks if switching camera
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => {
+          try {
+            track.stop();
+            track.enabled = false;
+          } catch (tErr) {
+            console.warn('Track stop notice:', tErr);
+          }
+        });
+        streamRef.current = null;
+      }
+
       let stream: MediaStream | null = null;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: targetFacing },
           audio: false,
         });
       } catch (firstErr) {
         console.warn('Initial camera constraint attempt fallback to standard video:', firstErr);
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: targetFacing },
+            audio: false,
+          });
+        } catch (secErr) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
       }
 
       if (stream) {
         streamRef.current = stream;
+        setCameraFacingMode(targetFacing);
         setCameraActive(true);
         cameraActiveRef.current = true;
         setCameraPermissionError(null);
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch((playErr) => console.warn('Video element play error:', playErr));
+        }
         if (voiceSpeechEnabled) {
-          soundEngine.speak('Camera active. Ready for vision monitoring.');
+          soundEngine.speak(
+            targetFacing === 'environment'
+              ? 'Rear camera active. Step onto your mat.'
+              : 'Front camera active. Ready for vision monitoring.'
+          );
         }
 
         // Auto-enable & recover voice commands when camera stream is opened
@@ -631,13 +662,22 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       const msg = isDenied
         ? 'Camera permission was blocked. Allow camera access in browser settings.'
         : isNotFound
-        ? 'No webcam device found. Please connect a webcam.'
+        ? 'No camera device found. Please connect or enable a camera.'
         : 'Camera could not be started: ' + (err?.message || 'Access restricted.');
       setCameraPermissionError(msg);
       setCameraActive(false);
       cameraActiveRef.current = false;
       setIsStartingCamera(false);
       return false;
+    }
+  };
+
+  // One-Tap Camera Flip toggle between front (selfie) and rear (environment) cameras
+  const handleToggleCameraFacing = async () => {
+    const nextFacing = cameraFacingMode === 'user' ? 'environment' : 'user';
+    setCameraFacingMode(nextFacing);
+    if (cameraActive) {
+      await startCamera(nextFacing);
     }
   };
 
@@ -944,19 +984,15 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       return;
     }
 
-    // Camera MUST be active before starting pose timer and streak!
+    // Ensure camera is active when starting pose monitoring
     if (!cameraActive) {
-      if (voiceSpeechEnabled) {
-        soundEngine.speak('Please turn on your camera first, then click I am ready.');
-      }
       const success = await startCamera();
       if (!success) {
         if (voiceSpeechEnabled) {
           soundEngine.speak('Please enable camera access to start posture monitoring.');
         }
+        return;
       }
-      // Camera started; return so user can see preview and explicitly click "I'm Ready"
-      return;
     }
 
     setIsPoseActive(true);
@@ -1161,7 +1197,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
   return (
     <div 
       id="live-posture-session-view" 
-      className="min-h-[780px] h-[92vh] max-h-screen bg-[#070b12] text-stone-100 flex flex-col relative overflow-hidden selection:bg-emerald-500 selection:text-white"
+      className="min-h-screen lg:min-h-[780px] lg:h-[92vh] bg-[#070b12] text-stone-100 flex flex-col relative overflow-y-auto lg:overflow-hidden selection:bg-emerald-500 selection:text-white pb-safe"
     >
       {/* Ambient Visual Glows */}
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-emerald-600/10 rounded-full blur-3xl pointer-events-none" />
@@ -1280,15 +1316,16 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
           <button
             id="finish-session-btn"
             onClick={handleCompleteSession}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 active:scale-95 text-white font-bold text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-900/60 ring-1 ring-emerald-300/40 cursor-pointer"
+            className="px-3 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 active:scale-95 text-white font-bold text-xs transition flex items-center gap-1.5 sm:gap-2 shadow-lg shadow-emerald-900/60 ring-1 ring-emerald-300/40 cursor-pointer min-h-[40px]"
             title={
               practicedPoseNames.length > 0
                 ? `Generate your AI report for: ${practicedPoseNames.join(', ')}`
                 : 'Finish the session and view your AI report'
             }
           >
-            <Award className="w-4 h-4" />
-            <span>Finish &amp; View AI Report</span>
+            <Award className="w-4 h-4 shrink-0" />
+            <span className="hidden sm:inline">Finish &amp; View AI Report</span>
+            <span className="sm:hidden">Finish</span>
             {practicedPoseNames.length > 0 && (
               <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] font-mono leading-none">
                 {practicedPoseNames.length} {practicedPoseNames.length === 1 ? 'pose' : 'poses'}
@@ -1300,7 +1337,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
           <button
             type="button"
             onClick={() => setShowFoodAdvisory((prev) => !prev)}
-            className={`px-2 sm:px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none ${
+            className={`p-2 sm:px-2.5 sm:py-1.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs select-none min-h-[40px] min-w-[40px] ${
               showFoodAdvisory
                 ? 'bg-amber-950/80 text-amber-300 border-amber-500/60 ring-2 ring-amber-500/20'
                 : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700 hover:text-white'
@@ -1308,13 +1345,12 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
             title="Precautionary Health & Dietary Advisory (Post-Meal Yoga Guidelines)"
           >
             <Info className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            
           </button>
 
           {/* Exit Button */}
           <button
             onClick={() => setShowExitConfirm(true)}
-            className="px-2.5 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-stone-200 text-xs font-medium transition cursor-pointer"
+            className="px-2.5 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-stone-200 text-xs font-medium transition cursor-pointer min-h-[40px]"
           >
             Exit
           </button>
@@ -1377,7 +1413,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       {/* ========================================================================= */}
       <div 
         ref={containerRef}
-        className={`flex-1 w-full mx-auto p-2.5 sm:p-4 flex flex-col lg:flex-row gap-0 items-stretch relative z-10 overflow-hidden min-h-[700px] ${
+        className={`flex-1 w-full mx-auto p-2 sm:p-4 flex flex-col lg:flex-row gap-3 lg:gap-0 items-stretch relative z-10 overflow-y-auto lg:overflow-hidden min-h-0 ${
           isDraggingSplit ? 'select-none cursor-col-resize' : ''
         }`}
       >
@@ -1386,12 +1422,12 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
         {/* LEFT AREA: LIVE WEBCAM & READY ONBOARDING STAGE                         */}
         {/* ======================================================================= */}
         <div 
-          style={{ width: isDrawerOpen && window.innerWidth >= 1024 ? `${splitPercent}%` : '100%' }}
-          className="flex flex-col space-y-2.5 min-w-0 transition-[width] duration-75 lg:pr-2.5 h-full justify-between"
+          style={{ width: isDrawerOpen && typeof window !== 'undefined' && window.innerWidth >= 1024 ? `${splitPercent}%` : '100%' }}
+          className="flex flex-col space-y-2.5 min-w-0 transition-[width] duration-75 lg:pr-2.5 w-full lg:h-full justify-between shrink-0"
         >
           
           {/* Viewport Card */}
-          <div className="relative flex-1 min-h-[480px] bg-stone-950 rounded-3xl overflow-hidden border border-stone-800/90 shadow-2xl flex items-center justify-center group/viewport">
+          <div className="relative flex-1 min-h-[300px] sm:min-h-[380px] lg:min-h-[480px] h-[44vh] sm:h-[48vh] lg:h-auto bg-stone-950 rounded-2xl sm:rounded-3xl overflow-hidden border border-stone-800/90 shadow-2xl flex items-center justify-center group/viewport">
             {/* Ambient Border Glow */}
             <div className={`absolute -inset-0.5 bg-gradient-to-r ${poseTheme.ring} opacity-20 group-hover/viewport:opacity-30 blur-xs transition duration-500`} />
 
@@ -1403,11 +1439,11 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                   autoPlay
                   playsInline
                   muted
-                  className={`w-full h-full ${videoFitMode === 'contain' ? 'object-contain bg-black' : 'object-cover bg-black'} transform -scale-x-100 relative z-10 transition-all duration-300`}
+                  className={`w-full h-full ${videoFitMode === 'contain' ? 'object-contain bg-black' : 'object-cover bg-black'} ${cameraFacingMode === 'user' ? 'transform -scale-x-100' : ''} relative z-10 transition-all duration-300`}
                 />
                 <canvas
                   ref={canvasRef}
-                  className={`absolute inset-0 w-full h-full ${videoFitMode === 'contain' ? 'object-contain' : 'object-cover'} transform -scale-x-100 pointer-events-none z-15`}
+                  className={`absolute inset-0 w-full h-full ${videoFitMode === 'contain' ? 'object-contain' : 'object-cover'} ${cameraFacingMode === 'user' ? 'transform -scale-x-100' : ''} pointer-events-none z-15`}
                 />
               </div>
             ) : (
@@ -1493,7 +1529,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                       </div>
                       <div className="flex items-center gap-2 w-full justify-end">
                         <button
-                          onClick={startCamera}
+                          onClick={() => startCamera()}
                           className="px-2.5 py-1 rounded-lg bg-amber-900/80 hover:bg-amber-800 text-amber-200 text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
                         >
                           <RefreshCw className="w-3 h-3" /> Retry Camera
@@ -1514,6 +1550,8 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               isCurrentPoseLocked={isCurrentPoseLocked}
               onOpenAuth={onOpenAuth}
               videoFitMode={videoFitMode}
+              cameraFacingMode={cameraFacingMode}
+              onToggleCameraFacing={handleToggleCameraFacing}
               modelPoseResult={modelPoseResult}
               postureAnalysis={postureAnalysis}
               poseHoldSeconds={poseHoldSeconds}
@@ -1530,12 +1568,69 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               onSetVideoFitMode={setVideoFitMode}
               onSetManualTargetSeconds={setManualTargetSeconds}
               onConfirmReadyAndStart={handleConfirmReadyAndStart}
-              onStartCamera={startCamera}
+              onStartCamera={() => startCamera()}
               onCloseVoiceTable={() => setShowVoiceCmdTable(false)}
             />
           </div>
 
-          {/* Action Bar (Camera Toggle, Full-Body Framing, Start/Pause, Analyze Form, Prev/Next) */}
+          {/* STACKED REAL-TIME COACHING CARD (Mobile & Tablet, Enhanced for Distance Viewing on Mat) */}
+          <div className="lg:hidden w-full bg-gradient-to-r from-stone-900/98 via-[#0b1322]/95 to-stone-900/98 rounded-2xl p-3 sm:p-4 border border-stone-800 shadow-xl space-y-2 shrink-0">
+            <div className="flex items-center justify-between gap-2 border-b border-stone-800/80 pb-2">
+              <div className="flex items-center gap-2">
+                <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                  !isPoseActive
+                    ? 'bg-amber-400'
+                    : modelPoseResult?.is_correct
+                    ? 'bg-emerald-400 animate-pulse'
+                    : (modelPoseResult?.has_red || modelPoseResult?.joints?.some(j => j.status === 'critical' || (j.status as string) === 'red' || j.deviation >= 3.5))
+                    ? 'bg-rose-500'
+                    : 'bg-yellow-400'
+                }`} />
+                <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                  Veda AI Guidance
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs font-mono text-stone-300">
+                <span>{postureAnalysis.alignmentStatus}</span>
+                <span className="text-emerald-400 font-bold">({postureAnalysis.score}%)</span>
+              </div>
+            </div>
+
+            {/* Large Actionable Posture Cue (Legible from 6-10 feet away) */}
+            <div className="p-3 rounded-xl bg-stone-950/80 border border-stone-800/80">
+              <p className="text-sm sm:text-base font-bold text-white leading-snug">
+                👉 {postureAnalysis.keyCues[0] || (currentPose ? `Get into ${currentPose.name} position` : 'Select an asana to begin')}
+              </p>
+              {postureAnalysis.keyCues[1] && (
+                <p className="text-xs text-stone-300 mt-1 font-medium">
+                  • {postureAnalysis.keyCues[1]}
+                </p>
+              )}
+            </div>
+
+            {/* Quick Status Strip (Hold streak, best, target, voice status) */}
+            <div className="flex items-center justify-between text-xs font-mono text-stone-400 pt-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-300 font-bold">
+                  Hold: {poseHoldSeconds}s / {targetHoldDuration}s
+                </span>
+                {currentPose && bestHoldPerPose[currentPose.id] > 0 && (
+                  <span className="text-amber-400 text-[11px]">
+                    (Best: {bestHoldPerPose[currentPose.id]}s)
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {voiceSpeechEnabled && (
+                  <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                    <Volume2 className="w-3 h-3" /> Voice On
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Action Bar (Camera Toggle, Camera Flip, Framing, Start/Pause, Prev/Next) */}
           <div className="bg-stone-900/90 rounded-2xl p-2.5 sm:p-3 border border-stone-800 flex flex-wrap items-center justify-between gap-2 shadow-lg shrink-0">
             <div className="flex items-center gap-2 flex-wrap">
               {/* Ready / Play / Pause Toggle Button */}
@@ -1544,7 +1639,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                   <button
                     type="button"
                     onClick={onOpenAuth}
-                    className="px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm bg-amber-600 hover:bg-amber-500 text-white"
+                    className="px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm bg-amber-600 hover:bg-amber-500 text-white min-h-[42px]"
                   >
                     <Lock className="w-3.5 h-3.5" />
                     <span>Unlock Pose (Sign Up)</span>
@@ -1554,7 +1649,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                     type="button"
                     onClick={() => isPoseActive ? setIsPoseActive(false) : handleConfirmReadyAndStart()}
                     disabled={isStartingCamera}
-                    className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm ${
+                    className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm min-h-[42px] ${
                       isPoseActive 
                         ? 'bg-amber-600 hover:bg-amber-500 text-white' 
                         : cameraActive
@@ -1590,9 +1685,9 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
               {/* Distinct Turn On / Off Camera Button */}
               <button
                 type="button"
-                onClick={cameraActive ? stopCamera : startCamera}
+                onClick={cameraActive ? stopCamera : () => startCamera()}
                 disabled={isStartingCamera}
-                className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border shadow-sm ${
+                className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border shadow-sm min-h-[42px] ${
                   cameraActive
                     ? 'bg-stone-800 hover:bg-stone-700 text-rose-300 border-rose-500/40'
                     : 'bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white border-emerald-500/50'
@@ -1611,10 +1706,23 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                 )}
               </button>
 
+              {/* One-Tap Camera Flip Button (Front / Rear) */}
+              <button
+                type="button"
+                onClick={handleToggleCameraFacing}
+                disabled={isStartingCamera}
+                className="px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border shadow-sm bg-stone-800 hover:bg-stone-700 text-stone-200 border-stone-700 min-h-[42px] active:scale-95"
+                title={cameraFacingMode === 'user' ? 'Switch to Rear / Environment Camera' : 'Switch to Front / Selfie Camera'}
+              >
+                <SwitchCamera className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">{cameraFacingMode === 'user' ? 'Flip to Rear' : 'Flip to Front'}</span>
+                <span className="sm:hidden">Flip</span>
+              </button>
+
               {/* Full Body Fit Framing Toggle */}
               <button
                 onClick={() => setVideoFitMode(videoFitMode === 'contain' ? 'cover' : 'contain')}
-                className={`px-2.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
+                className={`px-2.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs min-h-[42px] ${
                   videoFitMode === 'contain'
                     ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
                     : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700'
@@ -1638,7 +1746,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                   setVoiceSpeechEnabled(nextVal);
                   soundEngine.setMuted(!nextVal);
                 }}
-                className={`px-2.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none ${
+                className={`px-2.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none min-h-[42px] ${
                   voiceSpeechEnabled
                     ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
                     : 'bg-stone-800 text-stone-400 border-stone-700 hover:bg-stone-700 hover:text-stone-200'
@@ -1657,13 +1765,13 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                 <span>Voice</span>
               </button>
 
-              {/* Studio Split Layout Adjustment Option (50:50, 60:40, 40:60) */}
-              <div className="relative">
+              {/* Studio Split Layout Adjustment Option (Desktop Only) */}
+              <div className="relative hidden lg:block">
                 <button
                   id="split-adjustment-toggle-btn"
                   type="button"
                   onClick={() => setShowSplitAdjustMenu(!showSplitAdjustMenu)}
-                  className={`px-2.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none ${
+                  className={`px-2.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs select-none min-h-[42px] ${
                     showSplitAdjustMenu
                       ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/60 ring-2 ring-emerald-500/30'
                       : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700 hover:text-white'
@@ -1744,7 +1852,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                 id="toggle-drawer-bottom-btn"
                 type="button"
                 onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-                className={`px-2.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
+                className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs min-h-[42px] ${
                   isDrawerOpen
                     ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
                     : 'bg-stone-800 text-stone-300 border-stone-700 hover:bg-stone-700 hover:text-white'
@@ -1768,7 +1876,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
                   <button
                     onClick={handlePrevPose}
                     disabled={selectedPoseIndex === null || currentPersonalizedIdx <= 0}
-                    className="px-3 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-40 text-stone-300 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                    className="px-3 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-40 text-stone-300 text-xs font-semibold flex items-center gap-1 transition cursor-pointer min-h-[42px]"
                   >
                     <ChevronLeft className="w-3.5 h-3.5" /> Prev
                   </button>
@@ -1779,7 +1887,7 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
 
                   <button
                     onClick={handleNextPose}
-                    className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white text-xs font-bold flex items-center gap-1 transition cursor-pointer min-h-[42px]"
                   >
                     <span>
                       {selectedPoseIndex === null
@@ -1982,53 +2090,59 @@ export const LivePostureSession: React.FC<LivePostureSessionProps> = ({
       {/* ========================================================================= */}
       <AnimatePresence>
         {isMobileScreen && !dismissMobileWarning && (
-          <div className="fixed inset-0 z-50 bg-[#070b12]/95 backdrop-blur-xl text-white p-5 flex flex-col items-center justify-center text-center">
+          <div className="fixed inset-0 z-50 bg-[#070b12]/90 backdrop-blur-md text-white p-3 sm:p-4 flex flex-col items-center justify-center text-center">
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 10 }}
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 10 }}
-              className="max-w-md w-full bg-stone-900 border border-emerald-500/40 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl relative overflow-hidden"
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="max-w-xs sm:max-w-sm w-full bg-stone-900 border border-emerald-500/30 rounded-2xl p-4 sm:p-5 space-y-3 shadow-2xl relative overflow-hidden"
             >
-              {/* Background ambient glow */}
-              <div className="absolute top-0 right-0 w-40 h-40 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+              {/* Close button */}
+              <button
+                type="button"
+                onClick={() => setDismissMobileWarning(true)}
+                aria-label="Close advisory"
+                className="absolute top-3 right-3 w-7 h-7 rounded-full bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
 
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center mx-auto shadow-lg shadow-emerald-950/50">
-                <Laptop className="w-8 h-8 text-emerald-300" />
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mx-auto shadow-sm">
+                <Laptop className="w-5 h-5 text-emerald-300" />
               </div>
 
-              <div className="space-y-2">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 text-[11px] font-bold border border-emerald-500/30">
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+              <div className="space-y-1.5">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
+                  <Sparkles className="w-3 h-3 text-emerald-400" />
                   <span>Desktop PC / Laptop Recommended</span>
                 </div>
-                <h2 className="text-xl font-serif font-bold text-white leading-snug">
-                  Use PC or Laptop for a Better User Experience
+                <h2 className="text-sm sm:text-base font-bold text-white leading-snug">
+                  Use PC or Laptop for Best Experience
                 </h2>
-                <p className="text-xs text-stone-300 leading-relaxed">
-                  Real-time posture tracking & joint alignment vision require wider desktop camera view.
+                <p className="text-[11px] text-stone-300 leading-snug">
+                  Full-body posture tracking needs your whole mat in view. Prop your phone 6–8 ft away or use a PC for a wider camera angle.
                 </p>
-                <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/30 text-[11px] text-emerald-200 font-medium">
-                  We are actively developing the mobile view experience. Thank you for your patience! This feature will be coming soon.
-                </div>
               </div>
 
-              <div className="flex flex-col gap-2.5 pt-2">
+              <div className="flex flex-col gap-2 pt-1">
                 <button
+                  type="button"
+                  onClick={() => setDismissMobileWarning(true)}
+                  className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                >
+                  <span>Continue Practice on Mobile</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => {
                     stopCamera();
                     onClose();
                   }}
-                  className="w-full py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs transition cursor-pointer shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2"
+                  className="w-full py-1.5 text-stone-400 hover:text-stone-200 text-[11px] font-medium transition cursor-pointer"
                 >
-                  <ArrowLeft className="w-4 h-4" />
-                  <span>Return to Home Dashboard</span>
-                </button>
-
-                <button
-                  onClick={() => setDismissMobileWarning(true)}
-                  className="w-full py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-medium transition cursor-pointer"
-                >
-                  Preview Mobile Mode Anyway
+                  Return to Dashboard
                 </button>
               </div>
             </motion.div>
